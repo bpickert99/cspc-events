@@ -1,0 +1,7 @@
+bash
+git init
+git add .
+git commit -m "Initial CSPC Events build"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/cspc-events.git
+git push -u origin main
