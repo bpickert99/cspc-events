@@ -3,11 +3,12 @@ import { useParams } from "react-router-dom";
 import { doc, getDoc, getDocs, query, collection, where, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage, TEST_MODE } from "../firebase";
+import { useAuth } from "../contexts/AuthContext";
 
 const MERGE_FIELDS = [
   { token: "{{firstName}}", label: "First Name" },
   { token: "{{lastName}}", label: "Last Name" },
-  { token: "{{fullName}}", label: "Full Name (with title)" },
+  { token: "{{fullName}}", label: "Full Name" },
   { token: "{{eventName}}", label: "Event Name" },
   { token: "{{eventDate}}", label: "Event Date" },
   { token: "{{eventLocation}}", label: "Venue" },
@@ -32,26 +33,26 @@ function buildEmailHtml(bodyText, guest, event, attachments, logoUrl, baseUrl) {
   const resolved = resolveMerge(bodyText, guest, event, baseUrl);
   const rsvpLink = `${baseUrl}#/rsvp/${guest.rsvpToken}`;
   const attHtml = attachments.length
-    ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #E5E7EB;font-size:13px;color:#6B7280;">
+    ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid #E4E8F0;font-size:13px;color:#6B7A99;">
         <strong>Attachments:</strong> ${attachments.map((a) => `<a href="${a.url}" style="color:#1B2B6B;">${a.name}</a>`).join(" &nbsp;|&nbsp; ")}
        </div>`
     : "";
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"></head>
-<body style="margin:0;padding:0;background:#F4F6FB;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F6FB;padding:32px 16px;">
+<body style="margin:0;padding:0;background:#F6F8FC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F8FC;padding:32px 16px;">
 <tr><td align="center">
-<table width="580" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12);">
-  <tr><td style="background:#0F1A45;padding:28px 32px;text-align:center;">
-    <img src="${logoUrl}" alt="CSPC" style="height:48px;filter:brightness(0) invert(1);" />
+<table width="580" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(15,26,69,.10);">
+  <tr><td style="background:linear-gradient(135deg,#080F2E 0%,#1B2B6B 100%);padding:28px 32px;text-align:center;">
+    <img src="${logoUrl}" alt="CSPC" style="height:44px;filter:brightness(0) invert(1);" />
   </td></tr>
-  <tr><td style="padding:32px 36px;color:#1F2937;font-size:15px;line-height:1.7;">
+  <tr><td style="padding:32px 36px;color:#1A202C;font-size:15px;line-height:1.75;">
     <div style="white-space:pre-wrap;">${resolved}</div>
     <div style="margin-top:28px;text-align:center;">
-      <a href="${rsvpLink}" style="display:inline-block;background:#1B2B6B;color:#FFFFFF;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:15px;">RSVP Now</a>
+      <a href="${rsvpLink}" style="display:inline-block;background:linear-gradient(135deg,#243580 0%,#0F1A45 100%);color:#FFFFFF;padding:13px 30px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:0.01em;">RSVP Now</a>
     </div>
     ${attHtml}
   </td></tr>
-  <tr><td style="background:#F7F8FC;padding:18px 36px;text-align:center;font-size:12px;color:#9CA3AF;border-top:1px solid #E5E7EB;">
+  <tr><td style="background:#F6F8FC;padding:18px 36px;text-align:center;font-size:12px;color:#94A0B8;border-top:1px solid #E4E8F0;">
     Center for the Study of the Presidency and Congress &nbsp;·&nbsp; Washington, D.C.<br>
     1020 19th Street NW, Suite 250, Washington, DC 20036
   </td></tr>
@@ -62,12 +63,15 @@ function buildEmailHtml(bodyText, guest, event, attachments, logoUrl, baseUrl) {
 
 export default function InvitationComposer() {
   const { id } = useParams();
+  const { user } = useAuth();
   const [event, setEvent] = useState(null);
   const [guests, setGuests] = useState([]);
   const [template, setTemplate] = useState({ subject: "", body: "", attachments: [] });
   const [previewGuest, setPreviewGuest] = useState(null);
   const [sending, setSending] = useState(false);
+  const [sendingPreview, setSendingPreview] = useState(false);
   const [sendResult, setSendResult] = useState(null);
+  const [previewResult, setPreviewResult] = useState(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [selectedGuests, setSelectedGuests] = useState("unsent");
   const [filterTag, setFilterTag] = useState("all");
@@ -88,9 +92,7 @@ export default function InvitationComposer() {
         }));
       }
     });
-    getDoc(doc(db, "emailTemplates", id)).then((s) => {
-      if (s.exists()) setTemplate(s.data());
-    });
+    getDoc(doc(db, "emailTemplates", id)).then((s) => { if (s.exists()) setTemplate(s.data()); });
     getDocs(query(collection(db, "guests"), where("eventId", "==", id))).then((snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setGuests(list);
@@ -111,10 +113,7 @@ export default function InvitationComposer() {
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
       setTemplate((t) => ({ ...t, attachments: [...(t.attachments || []), { name: file.name, url, size: file.size }] }));
-    } finally {
-      setUploadingFile(false);
-      e.target.value = "";
-    }
+    } finally { setUploadingFile(false); e.target.value = ""; }
   };
 
   const removeAttachment = (name) =>
@@ -133,6 +132,26 @@ export default function InvitationComposer() {
     return base;
   };
 
+  // Send a preview to the currently logged-in user's email
+  const sendPreview = async () => {
+    if (!previewGuest) return alert("No guest selected for preview.");
+    setSendingPreview(true);
+    setPreviewResult(null);
+    const logoUrl = `${baseUrl}cspc-logo.png`;
+    const html = buildEmailHtml(template.body, previewGuest, event, template.attachments || [], logoUrl, baseUrl);
+    const subject = `[PREVIEW] ${resolveMerge(template.subject, previewGuest, event, baseUrl)}`;
+
+    if (TEST_MODE) {
+      console.log(`[PREVIEW EMAIL]\nTo: ${user.email}\nSubject: ${subject}\n\nRendered as preview guest: ${previewGuest.firstName} ${previewGuest.lastName}`);
+      await new Promise((r) => setTimeout(r, 600));
+      setPreviewResult({ ok: true, email: user.email });
+    } else {
+      // TODO: wire MSAL token and call sendEmailViaGraph to user.email
+      setPreviewResult({ ok: false, error: "Graph API not yet configured." });
+    }
+    setSendingPreview(false);
+  };
+
   const sendAll = async () => {
     const targets = getTargetGuests();
     if (!targets.length) return alert("No guests to send to.");
@@ -140,26 +159,21 @@ export default function InvitationComposer() {
     setSending(true);
     setSendResult(null);
     await saveTemplate();
-
     const logoUrl = `${baseUrl}cspc-logo.png`;
     let sent = 0, failed = 0;
-
     for (const guest of targets) {
       try {
         const html = buildEmailHtml(template.body, guest, event, template.attachments || [], logoUrl, baseUrl);
         const subject = resolveMerge(template.subject, guest, event, baseUrl);
         if (TEST_MODE) {
-          console.log(`[TEST MODE] Email to: ${guest.email}\nSubject: ${subject}\nRSVP link: ${baseUrl}#/rsvp/${guest.rsvpToken}\n---`);
+          console.log(`[TEST] To: ${guest.email} | Subject: ${subject} | RSVP: ${baseUrl}#/rsvp/${guest.rsvpToken}`);
           await new Promise((r) => setTimeout(r, 80));
         } else {
           throw new Error("Graph API not yet configured.");
         }
         await updateDoc(doc(db, "guests", guest.id), { emailSent: true, emailSentAt: serverTimestamp() });
         sent++;
-      } catch (err) {
-        console.error("Failed to send to", guest.email, err);
-        failed++;
-      }
+      } catch (err) { console.error("Failed:", guest.email, err); failed++; }
     }
     setSendResult({ sent, failed });
     setSending(false);
@@ -167,7 +181,6 @@ export default function InvitationComposer() {
 
   if (!event) return <div className="loading">Loading...</div>;
   const targets = getTargetGuests();
-
   const previewHtml = previewGuest
     ? buildEmailHtml(template.body, previewGuest, event, template.attachments || [], "./cspc-logo.png", baseUrl)
     : "";
@@ -176,14 +189,14 @@ export default function InvitationComposer() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Invitations — {event.name}</h1>
-          <p>Compose your email, then send to your guest list.</p>
+          <h1>Invitations</h1>
+          <p>{event.name}</p>
         </div>
       </div>
 
       {TEST_MODE && (
-        <div className="success-msg" style={{ background: "var(--gold-light)", borderColor: "var(--gold)", color: "#92400E" }}>
-          <strong>Test Mode:</strong> Emails will be logged to the browser console instead of sent. Toggle <code>TEST_MODE</code> in <code>firebase.js</code> once Graph API is configured.
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#92400E", padding: "0.75rem 1rem", borderRadius: "var(--radius)", fontSize: "0.875rem", marginBottom: "1rem" }}>
+          <strong>Test Mode:</strong> Emails log to the browser console. Set <code>TEST_MODE = false</code> in <code>firebase.js</code> after Graph API is configured.
         </div>
       )}
       {sendResult && (
@@ -194,7 +207,7 @@ export default function InvitationComposer() {
 
       <div className="tabs">
         <button className={`tab ${tab === "compose" ? "active" : ""}`} onClick={() => setTab("compose")}>Compose</button>
-        <button className={`tab ${tab === "recipients" ? "active" : ""}`} onClick={() => setTab("recipients")}>Recipients</button>
+        <button className={`tab ${tab === "recipients" ? "active" : ""}`} onClick={() => setTab("recipients")}>Recipients ({targets.length})</button>
       </div>
 
       {tab === "compose" && (
@@ -218,11 +231,8 @@ export default function InvitationComposer() {
                       </button>
                     ))}
                   </div>
-                  <textarea className="form-textarea"
-                    style={{ minHeight: 220, marginTop: "0.5rem", fontFamily: "monospace", fontSize: "0.875rem" }}
-                    value={template.body}
-                    onChange={(e) => setTemplate((t) => ({ ...t, body: e.target.value }))} />
-                  <div className="form-hint">Click a field above to insert it at the end of your text.</div>
+                  <textarea className="form-textarea" style={{ minHeight: 220, marginTop: "0.5rem", fontFamily: "monospace", fontSize: "0.875rem" }}
+                    value={template.body} onChange={(e) => setTemplate((t) => ({ ...t, body: e.target.value }))} />
                 </div>
               </div>
             </div>
@@ -251,21 +261,29 @@ export default function InvitationComposer() {
             <div className="card">
               <div className="card-header"><h2>Preview As</h2></div>
               <div className="card-body">
-                <select className="form-select" value={previewGuest?.id || ""}
+                <select className="form-select" style={{ marginBottom: "0.875rem" }} value={previewGuest?.id || ""}
                   onChange={(e) => setPreviewGuest(guests.find((g) => g.id === e.target.value))}>
                   {guests.map((g) => <option key={g.id} value={g.id}>{g.firstName} {g.lastName}</option>)}
                 </select>
+                <button className="btn btn-secondary" onClick={sendPreview} disabled={sendingPreview || !previewGuest}>
+                  {sendingPreview ? "Sending preview..." : `Send preview to ${user?.email || "me"}`}
+                </button>
+                {previewResult && (
+                  <div style={{ marginTop: "0.625rem", fontSize: "0.8125rem", color: previewResult.ok ? "var(--green)" : "var(--red)" }}>
+                    {previewResult.ok ? `✓ Preview sent to ${previewResult.email}` : `Error: ${previewResult.error}`}
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           <div>
             <div className="card" style={{ position: "sticky", top: "72px" }}>
-              <div className="card-header"><h2>Email Preview</h2></div>
-              <div className="card-body" style={{ padding: 0, overflow: "hidden", borderRadius: "0 0 6px 6px" }}>
+              <div className="card-header"><h2>Live Preview</h2></div>
+              <div style={{ borderRadius: "0 0 var(--radius-lg) var(--radius-lg)", overflow: "hidden" }}>
                 {previewGuest
-                  ? <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 520, border: "none" }} />
-                  : <div className="empty-state" style={{ padding: "2rem" }}>Add guests to preview</div>}
+                  ? <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 540, border: "none" }} />
+                  : <div className="empty-state" style={{ padding: "3rem" }}>Add guests to preview</div>}
               </div>
             </div>
           </div>
@@ -277,13 +295,13 @@ export default function InvitationComposer() {
           <div className="card" style={{ marginBottom: "1.25rem" }}>
             <div className="card-header"><h2>Who to Send To</h2></div>
             <div className="card-body">
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1rem" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1.125rem" }}>
                 {[
-                  { val: "unsent", label: `All guests who haven't received an email yet (${guests.filter((g) => !g.emailSent).length})` },
-                  { val: "all", label: `All guests — resend to everyone (${guests.length})` },
+                  { val: "unsent", label: `Not yet received an email (${guests.filter((g) => !g.emailSent).length})` },
+                  { val: "all", label: `Everyone — resend to all (${guests.length})` },
                   { val: "attending", label: `Attending guests only (${guests.filter((g) => g.rsvpStatus === "yes" || g.rsvpStatus === "partial").length})` },
-                  { val: "pending", label: `Guests who haven't responded yet (${guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length})` },
-                  { val: "custom", label: "Select specific guests manually" },
+                  { val: "pending", label: `Haven't responded yet (${guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length})` },
+                  { val: "custom", label: "Select specific guests" },
                 ].map((opt) => (
                   <label key={opt.val} className="checkbox-label">
                     <input type="radio" name="sendTo" value={opt.val} checked={selectedGuests === opt.val} onChange={() => setSelectedGuests(opt.val)} />
@@ -292,19 +310,14 @@ export default function InvitationComposer() {
                 ))}
               </div>
 
-              {/* Tag filter */}
               {eventTags.length > 0 && (
                 <div style={{ marginBottom: "1rem" }}>
-                  <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", marginBottom: "0.375rem" }}>FILTER BY TAG (optional)</div>
+                  <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>ALSO FILTER BY TAG</div>
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <button className={`btn btn-sm ${filterTag === "all" ? "btn-primary" : "btn-ghost"}`} onClick={() => setFilterTag("all")}>All tags</button>
+                    <button className={`btn btn-sm ${filterTag === "all" ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilterTag("all")}>All</button>
                     {eventTags.map((tag) => (
                       <button key={tag.id} onClick={() => setFilterTag(tag.id)}
-                        style={{
-                          padding: "0.3125rem 0.75rem", borderRadius: "99px", fontSize: "0.8125rem", fontWeight: 700, cursor: "pointer", border: "1.5px solid " + tag.color,
-                          background: filterTag === tag.id ? tag.color : tag.color + "22",
-                          color: filterTag === tag.id ? "white" : tag.color,
-                        }}>
+                        style={{ padding: "0.3125rem 0.75rem", borderRadius: "99px", fontSize: "0.8125rem", fontWeight: 700, cursor: "pointer", border: "1.5px solid " + tag.color, background: filterTag === tag.id ? tag.color : tag.color + "22", color: filterTag === tag.id ? "white" : tag.color, transition: "var(--transition)" }}>
                         {tag.name}
                       </button>
                     ))}
@@ -314,14 +327,13 @@ export default function InvitationComposer() {
 
               {selectedGuests === "custom" && (
                 <table className="data-table" style={{ marginTop: "0.75rem" }}>
-                  <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Status</th></tr></thead>
+                  <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Email Status</th></tr></thead>
                   <tbody>
                     {guests.map((g) => (
                       <tr key={g.id}>
-                        <td><input type="checkbox" checked={customIds.has(g.id)}
-                          onChange={() => setCustomIds((s) => { const n = new Set(s); n.has(g.id) ? n.delete(g.id) : n.add(g.id); return n; })} /></td>
-                        <td>{g.firstName} {g.lastName}</td>
-                        <td style={{ fontSize: "0.875rem", color: "var(--gray-600)" }}>{g.email}</td>
+                        <td><input type="checkbox" checked={customIds.has(g.id)} onChange={() => setCustomIds((s) => { const n = new Set(s); n.has(g.id) ? n.delete(g.id) : n.add(g.id); return n; })} /></td>
+                        <td style={{ fontWeight: 600 }}>{g.firstName} {g.lastName}</td>
+                        <td style={{ fontSize: "0.875rem", color: "var(--gray-500)" }}>{g.email}</td>
                         <td><span className={`badge ${g.emailSent ? "badge-sent" : "badge-pending"}`}>{g.emailSent ? "Sent" : "Not sent"}</span></td>
                       </tr>
                     ))}
@@ -335,9 +347,9 @@ export default function InvitationComposer() {
             <button className="btn btn-primary btn-lg" onClick={sendAll} disabled={sending || targets.length === 0}>
               {sending ? "Sending..." : `Send to ${targets.length} Guest${targets.length !== 1 ? "s" : ""}`}
             </button>
-            <button className="btn btn-ghost" onClick={saveTemplate}>Save Draft</button>
+            <button className="btn btn-secondary" onClick={saveTemplate}>Save Draft</button>
             <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>
-              {TEST_MODE ? "Test mode: emails logged to console" : "Sending from events@thepresidency.org"}
+              {TEST_MODE ? "Test mode — logs to console" : "Sends from events@thepresidency.org"}
             </span>
           </div>
         </div>

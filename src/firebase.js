@@ -8,12 +8,12 @@ import { getStorage } from "firebase/storage";
 // Get them from: Firebase Console → Project Settings → General → Your apps
 // ─────────────────────────────────────────────────────────────────────────────
 const firebaseConfig = {
-  apiKey: "AIzaSyAqTzvSMlnoAzCREk-X4SKmht-I_vjeM80",
-  authDomain: "cspc-events.firebaseapp.com",
-  projectId: "cspc-events",
-  storageBucket: "cspc-events.firebasestorage.app",
-  messagingSenderId: "1007458426858",
-  appId: "1:1007458426858:web:055efcef1f6bdbc17edc93"
+  apiKey: "REPLACE_WITH_YOUR_API_KEY",
+  authDomain: "REPLACE_WITH_YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
+  storageBucket: "REPLACE_WITH_YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "REPLACE_WITH_YOUR_SENDER_ID",
+  appId: "REPLACE_WITH_YOUR_APP_ID",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -12,91 +12,77 @@ function fmt24(t) {
 
 export default function RSVPPage() {
   const { token } = useParams();
-  const [state, setState] = useState("loading"); // loading | form | submitted | error | notfound
+  const [state, setState] = useState("loading");
   const [event, setEvent] = useState(null);
   const [guest, setGuestData] = useState(null);
   const [guestRef, setGuestRef] = useState(null);
 
-  // Form state
-  const [partAttendance, setPartAttendance] = useState({}); // { partId: "yes"|"no" }
-  const [plusOneAttending, setPlusOneAttending] = useState(""); // "yes"|"no"
+  const [partAttendance, setPartAttendance] = useState({});
+  const [plusOneAttending, setPlusOneAttending] = useState("");
   const [plusOneName, setPlusOneName] = useState("");
-  const [customFields, setCustomFields] = useState({}); // { fieldLabel: value }
+  const [customFields, setCustomFields] = useState({});
 
   useEffect(() => {
     (async () => {
       try {
-        // Look up guest by rsvpToken
         const q = query(collection(db, "guests"), where("rsvpToken", "==", token));
         const snap = await getDocs(q);
         if (snap.empty) { setState("notfound"); return; }
-
         const guestDoc = snap.docs[0];
         const g = { id: guestDoc.id, ...guestDoc.data() };
         setGuestData(g);
         setGuestRef(guestDoc.ref);
-
-        // Check if already submitted
         if (g.rsvpStatus && g.rsvpStatus !== "pending") { setState("submitted"); }
-
-        // Load event
         const evSnap = await getDoc(doc(db, "events", g.eventId));
         if (!evSnap.exists()) { setState("error"); return; }
         const ev = { id: evSnap.id, ...evSnap.data() };
         setEvent(ev);
-
-        // Pre-fill
         const initParts = {};
         (g.invitedParts || []).forEach((pid) => { initParts[pid] = ""; });
         setPartAttendance(initParts);
-        setPlusOneName(g.plusOneName || "");
-
         setState("form");
-      } catch (err) {
-        console.error(err);
-        setState("error");
-      }
+      } catch (err) { console.error(err); setState("error"); }
     })();
   }, [token]);
 
   const submit = async (e) => {
     e.preventDefault();
-
     const attendingParts = Object.entries(partAttendance).filter(([, v]) => v === "yes").map(([k]) => k);
     const anyYes = attendingParts.length > 0;
     const allParts = (guest.invitedParts || []).length;
     const rsvpStatus = !anyYes ? "no" : attendingParts.length === allParts ? "yes" : "partial";
+    const limit = guest.plusOneLimit ?? (guest.plusOneEligible ? 1 : 0);
 
     await updateDoc(guestRef, {
       rsvpStatus,
       rsvpParts: attendingParts,
       rsvpData: customFields,
-      plusOneName: plusOneName || guest.plusOneName || "",
-      plusOneRsvpStatus: guest.plusOneEligible ? plusOneAttending || "pending" : "no",
+      plusOneRsvpStatus: limit !== 0 && anyYes ? (plusOneAttending || "pending") : "no",
+      plusOneRsvpName: plusOneAttending === "yes" ? plusOneName : "",
       rsvpSubmittedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-
     setState("submitted");
   };
 
   const setCustom = (label, val) => setCustomFields((s) => ({ ...s, [label]: val }));
 
-  // ─── States ──────────────────────────────────────────────────────────────
+  const logoPath = "../cspc-logo.png";
+
   if (state === "loading") return (
     <div className="rsvp-page">
-      <div className="rsvp-header"><img src="../cspc-logo.png" alt="CSPC" /></div>
+      <div className="rsvp-header"><img src={logoPath} alt="CSPC" /></div>
       <div className="rsvp-body"><div className="loading">Loading your invitation...</div></div>
     </div>
   );
 
   if (state === "notfound") return (
     <div className="rsvp-page">
-      <div className="rsvp-header"><img src="../cspc-logo.png" alt="CSPC" /></div>
+      <div className="rsvp-header"><img src={logoPath} alt="CSPC" /></div>
       <div className="rsvp-body">
         <div className="rsvp-event-banner">
           <h1>Invitation not found</h1>
-          <p style={{ color: "var(--gray-600)", marginTop: "0.5rem" }}>This RSVP link may be invalid or expired. Please contact the CSPC team if you believe this is an error.</p>
+          <p style={{ color: "var(--gray-500)", marginTop: "0.5rem" }}>This RSVP link may be invalid or expired. Please contact <a href="mailto:events@thepresidency.org">events@thepresidency.org</a>.</p>
         </div>
       </div>
     </div>
@@ -104,8 +90,8 @@ export default function RSVPPage() {
 
   if (state === "error") return (
     <div className="rsvp-page">
-      <div className="rsvp-header"><img src="../cspc-logo.png" alt="CSPC" /></div>
-      <div className="rsvp-body"><div className="error-msg">Something went wrong loading your invitation. Please try again or contact us.</div></div>
+      <div className="rsvp-header"><img src={logoPath} alt="CSPC" /></div>
+      <div className="rsvp-body"><div className="error-msg">Something went wrong. Please try again or contact us.</div></div>
     </div>
   );
 
@@ -116,14 +102,14 @@ export default function RSVPPage() {
       : "";
     return (
       <div className="rsvp-page">
-        <div className="rsvp-header"><img src="../cspc-logo.png" alt="CSPC" /></div>
+        <div className="rsvp-header"><img src={logoPath} alt="CSPC" /></div>
         <div className="rsvp-body">
           <div className="rsvp-thanks">
             <div className="check">{attending ? "✅" : "📋"}</div>
             <h2>{attending ? "We'll see you there!" : "Thank you for letting us know."}</h2>
-            <p style={{ color: "var(--gray-600)", fontSize: "0.9375rem" }}>
+            <p style={{ color: "var(--gray-500)", fontSize: "0.9375rem" }}>
               {attending
-                ? `Your RSVP for ${event?.name} has been received. ${dateStr ? `We look forward to seeing you on ${dateStr}.` : ""}`
+                ? `Your RSVP for ${event?.name} has been received.${dateStr ? ` We look forward to seeing you on ${dateStr}.` : ""}`
                 : `We're sorry you won't be able to join us${event?.name ? ` for ${event.name}` : ""}. We hope to see you at a future event.`}
             </p>
             <p style={{ marginTop: "1.25rem", color: "var(--gray-400)", fontSize: "0.8125rem" }}>
@@ -132,8 +118,8 @@ export default function RSVPPage() {
           </div>
         </div>
         <div className="rsvp-footer">
-          <img src="../cspc-logo.png" alt="CSPC" style={{ height: 28, opacity: 0.4 }} />
-          <div style={{ marginTop: "0.5rem" }}>Center for the Study of the Presidency and Congress</div>
+          <img src={logoPath} alt="CSPC" style={{ height: 26, opacity: 0.35, display: "block", margin: "0 auto 0.5rem" }} />
+          <div>Center for the Study of the Presidency and Congress · Washington, D.C.</div>
         </div>
       </div>
     );
@@ -147,25 +133,21 @@ export default function RSVPPage() {
 
   const invitedParts = (event.parts || []).filter((p) => (guest.invitedParts || []).includes(p.id));
   const isSinglePart = invitedParts.length === 1;
+  const anyAttending = Object.values(partAttendance).some((v) => v === "yes");
+  const limit = guest.plusOneLimit ?? (guest.plusOneEligible ? 1 : 0);
 
-  // Custom fields relevant to this guest's invited parts
   const relevantFields = (event.customFields || []).filter((f) => {
     if (!f.forParts || f.forParts.length === 0) return true;
     return f.forParts.some((pid) => (guest.invitedParts || []).includes(pid));
-  }).filter((f) => {
-    // Don't show plus-one fields if guest is not eligible
-    if (!guest.plusOneEligible && f.label.toLowerCase().includes("plus one")) return false;
-    return true;
   });
 
   return (
     <div className="rsvp-page">
       <div className="rsvp-header">
-        <img src="../cspc-logo.png" alt="Center for the Study of the Presidency and Congress" />
+        <img src={logoPath} alt="Center for the Study of the Presidency and Congress" />
       </div>
 
       <div className="rsvp-body">
-        {/* Event banner */}
         <div className="rsvp-event-banner">
           <h1>{event.name}</h1>
           <div className="rsvp-event-meta">
@@ -180,11 +162,9 @@ export default function RSVPPage() {
         </div>
 
         <div className="rsvp-form-card">
-          <h2>
-            Dear {guest.title ? `${guest.title} ` : ""}{guest.firstName} {guest.lastName},
-          </h2>
-          <p style={{ fontSize: "0.9375rem", color: "var(--gray-600)", marginBottom: "1.25rem" }}>
-            Please confirm your attendance for {event.name}.
+          <h2>Dear {guest.title ? `${guest.title} ` : ""}{guest.firstName} {guest.lastName},</h2>
+          <p style={{ fontSize: "0.9375rem", color: "var(--gray-500)", marginBottom: "1.375rem" }}>
+            Please confirm your attendance{invitedParts.length > 1 ? " for each part of the event" : ""} below.
           </p>
 
           <form onSubmit={submit}>
@@ -208,7 +188,7 @@ export default function RSVPPage() {
                 <div key={part.id} className="rsvp-part-block">
                   <h3>
                     {part.name}
-                    {part.startTime ? <span style={{ fontWeight: 400, fontSize: "0.875rem" }}> — {fmt24(part.startTime)}{part.endTime ? ` to ${fmt24(part.endTime)}` : ""}</span> : ""}
+                    {part.startTime && <span style={{ fontWeight: 400, fontSize: "0.875rem", marginLeft: "0.5rem" }}>{fmt24(part.startTime)}{part.endTime ? ` – ${fmt24(part.endTime)}` : ""}</span>}
                   </h3>
                   <div className="rsvp-radio-group">
                     {["yes", "no"].map((opt) => (
@@ -224,35 +204,39 @@ export default function RSVPPage() {
               ))
             )}
 
-            {/* Plus one */}
-            {guest.plusOneEligible && (
+            {/* Plus one — guest enters name */}
+            {limit !== 0 && anyAttending && (
               <div style={{ marginBottom: "1rem" }}>
-                <div className="form-group">
-                  <label style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--gray-600)", display: "block", marginBottom: "0.5rem" }}>
-                    Will you be bringing a guest?
-                  </label>
-                  <div className="rsvp-radio-group">
+                <div className="rsvp-part-block" style={{ background: "var(--gold-light)", borderColor: "rgba(201,168,76,.3)" }}>
+                  <h3 style={{ color: "var(--gold-dark)" }}>
+                    Plus One {limit === -1 ? "" : limit > 1 ? `(up to ${limit})` : ""}
+                  </h3>
+                  <div className="rsvp-radio-group" style={{ marginBottom: "0.75rem" }}>
                     {["yes", "no"].map((opt) => (
                       <label key={opt} className="rsvp-radio">
-                        <input type="radio" name="plus_one" value={opt} required checked={plusOneAttending === opt} onChange={() => setPlusOneAttending(opt)} />
-                        {opt === "yes" ? "Yes, bringing a guest" : "No"}
+                        <input type="radio" name="plus_one" value={opt} required
+                          checked={plusOneAttending === opt}
+                          onChange={() => setPlusOneAttending(opt)} />
+                        {opt === "yes" ? "Yes, I'll bring a guest" : "No, just me"}
                       </label>
                     ))}
                   </div>
+                  {plusOneAttending === "yes" && (
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", display: "block", marginBottom: "0.375rem" }}>
+                        Guest's full name <span style={{ color: "var(--red)" }}>*</span>
+                      </label>
+                      <input className="form-input" value={plusOneName}
+                        onChange={(e) => setPlusOneName(e.target.value)}
+                        placeholder="Full name of your guest" required />
+                    </div>
+                  )}
                 </div>
-                {plusOneAttending === "yes" && (
-                  <div className="form-group">
-                    <label style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", display: "block", marginBottom: "0.375rem" }}>
-                      Guest's name
-                    </label>
-                    <input className="form-input" value={plusOneName} onChange={(e) => setPlusOneName(e.target.value)} placeholder="Full name of your guest" required />
-                  </div>
-                )}
               </div>
             )}
 
-            {/* Custom fields — only shown if attending at least one part */}
-            {Object.values(partAttendance).some((v) => v === "yes") && relevantFields.length > 0 && (
+            {/* Custom fields */}
+            {anyAttending && relevantFields.length > 0 && (
               <div>
                 <div className="divider" />
                 {relevantFields.map((field) => (
@@ -289,7 +273,7 @@ export default function RSVPPage() {
               </div>
             )}
 
-            <button type="submit" className="btn btn-primary btn-lg" style={{ width: "100%", marginTop: "1rem" }}>
+            <button type="submit" className="btn btn-primary btn-lg" style={{ width: "100%", marginTop: "1.25rem" }}>
               Submit RSVP
             </button>
           </form>
@@ -297,9 +281,9 @@ export default function RSVPPage() {
       </div>
 
       <div className="rsvp-footer">
-        <img src="../cspc-logo.png" alt="CSPC" style={{ height: 28, opacity: 0.4 }} />
-        <div style={{ marginTop: "0.5rem" }}>Center for the Study of the Presidency and Congress · Washington, D.C.</div>
-        <div>Questions? Contact <a href="mailto:events@thepresidency.org">events@thepresidency.org</a></div>
+        <img src={logoPath} alt="CSPC" style={{ height: 26, opacity: 0.35, display: "block", margin: "0 auto 0.5rem" }} />
+        <div>Center for the Study of the Presidency and Congress · Washington, D.C.</div>
+        <div>Questions? <a href="mailto:events@thepresidency.org">events@thepresidency.org</a></div>
       </div>
     </div>
   );
