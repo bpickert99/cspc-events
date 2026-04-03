@@ -123,9 +123,8 @@ input, textarea, select {
 .page-area {
   flex: 1;
   padding: 2rem;
-  max-width: 1100px;
+  min-width: 0;
 }
-.page-area.full { max-width: none; }
 
 /* ─── Page Header ─────────────────────────────────────────────────────────────── */
 .page-header {

@@ -10,33 +10,85 @@ import { v4 as uuid } from "uuid";
 const RSVP_STATUS_LABELS = { pending: "Pending", yes: "Attending", no: "Declined", partial: "Partial" };
 const RSVP_BADGE = { pending: "badge-pending", yes: "badge-yes", no: "badge-no", partial: "badge-partial" };
 
+const PLUS_ONE_OPTIONS = [
+  { value: "0", label: "No plus one" },
+  { value: "1", label: "1 guest" },
+  { value: "2", label: "2 guests" },
+  { value: "3", label: "3 guests" },
+  { value: "-1", label: "Unlimited guests" },
+];
+
+function TagPill({ tag }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>
+      {tag.name}
+    </span>
+  );
+}
+
 function GuestModal({ event, guest, onClose, onSave }) {
   const isEdit = Boolean(guest);
+  const eventTags = event.tags || [];
+
   const [form, setForm] = useState({
     firstName: guest?.firstName || "",
     lastName: guest?.lastName || "",
     title: guest?.title || "",
     email: guest?.email || "",
     invitedParts: guest?.invitedParts || (event.parts || []).map((p) => p.id),
-    plusOneEligible: guest?.plusOneEligible || false,
+    plusOneLimit: String(guest?.plusOneLimit ?? (guest?.plusOneEligible ? "1" : "0")),
+    plusOneNames: guest?.plusOneNames || [""],
     staffPoc: guest?.staffPoc || "",
     notes: guest?.notes || "",
+    tags: guest?.tags || [],
     rsvpStatus: guest?.rsvpStatus || "pending",
     rsvpParts: guest?.rsvpParts || [],
     rsvpData: guest?.rsvpData || {},
-    plusOneName: guest?.plusOneName || "",
-    plusOneEmail: guest?.plusOneEmail || "",
     plusOneRsvpStatus: guest?.plusOneRsvpStatus || "pending",
   });
   const [saving, setSaving] = useState(false);
-  const set = (f) => (e) => setForm((s) => ({ ...s, [f]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
 
-  const togglePart = (pid) => {
+  const set = (f) => (e) => setForm((s) => ({ ...s, [f]: e.target.value }));
+
+  const togglePart = (pid) => setForm((s) => ({
+    ...s,
+    invitedParts: s.invitedParts.includes(pid) ? s.invitedParts.filter((x) => x !== pid) : [...s.invitedParts, pid]
+  }));
+
+  const toggleTag = (tid) => setForm((s) => ({
+    ...s,
+    tags: s.tags.includes(tid) ? s.tags.filter((x) => x !== tid) : [...s.tags, tid]
+  }));
+
+  const limit = parseInt(form.plusOneLimit, 10);
+  const hasPlus = limit !== 0;
+  const isUnlimited = limit === -1;
+
+  // Sync plusOneNames array length to limit
+  const updateLimit = (val) => {
+    const n = parseInt(val, 10);
     setForm((s) => {
-      const inv = s.invitedParts.includes(pid) ? s.invitedParts.filter((x) => x !== pid) : [...s.invitedParts, pid];
-      return { ...s, invitedParts: inv };
+      let names = [...s.plusOneNames];
+      if (n > 0) {
+        while (names.length < n) names.push("");
+        names = names.slice(0, n);
+      } else if (n === -1) {
+        if (names.length === 0) names = [""];
+      } else {
+        names = [""];
+      }
+      return { ...s, plusOneLimit: val, plusOneNames: names };
     });
   };
+
+  const updatePlusOneName = (i, val) => setForm((s) => {
+    const names = [...s.plusOneNames];
+    names[i] = val;
+    return { ...s, plusOneNames: names };
+  });
+
+  const addUnlimitedGuest = () => setForm((s) => ({ ...s, plusOneNames: [...s.plusOneNames, ""] }));
+  const removeUnlimitedGuest = (i) => setForm((s) => ({ ...s, plusOneNames: s.plusOneNames.filter((_, j) => j !== i) }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -94,30 +146,65 @@ function GuestModal({ event, guest, onClose, onSave }) {
               </div>
             )}
 
-            {/* Plus one */}
-            <div className="form-group">
-              <label className="checkbox-label">
-                <input type="checkbox" checked={form.plusOneEligible} onChange={set("plusOneEligible")} />
-                This guest may bring a plus one
-              </label>
-            </div>
-            {form.plusOneEligible && (
-              <div style={{ background: "var(--gold-light)", border: "1px solid var(--gold)", borderRadius: "var(--radius)", padding: "0.875rem", marginBottom: "0.875rem" }}>
-                <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", marginBottom: "0.5rem" }}>PLUS ONE</div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Plus One Name</label>
-                    <input className="form-input" value={form.plusOneName} onChange={set("plusOneName")} placeholder="Name (if known)" />
-                  </div>
-                  <div className="form-group">
-                    <label>Plus One Email</label>
-                    <input className="form-input" type="email" value={form.plusOneEmail} onChange={set("plusOneEmail")} placeholder="(if known)" />
-                  </div>
+            {/* Tags */}
+            {eventTags.length > 0 && (
+              <div className="form-group">
+                <label>Tags</label>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  {eventTags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      style={{
+                        padding: "0.25rem 0.75rem", borderRadius: "99px", fontSize: "0.8125rem", fontWeight: 700, cursor: "pointer",
+                        background: form.tags.includes(tag.id) ? tag.color : tag.color + "22",
+                        color: form.tags.includes(tag.id) ? "white" : tag.color,
+                        border: `1.5px solid ${tag.color}`,
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {form.tags.includes(tag.id) ? "✓ " : ""}{tag.name}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
 
-            {/* RSVP override (for manual updates) */}
+            {/* Plus one — combined field */}
+            <div className="form-group">
+              <label>Plus One Invitation</label>
+              <select className="form-select" value={form.plusOneLimit} onChange={(e) => updateLimit(e.target.value)}>
+                {PLUS_ONE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+
+            {hasPlus && (
+              <div style={{ background: "var(--gold-light)", border: "1px solid var(--gold)", borderRadius: "var(--radius)", padding: "0.875rem", marginBottom: "0.875rem" }}>
+                <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", marginBottom: "0.5rem" }}>
+                  PLUS ONE{form.plusOneNames.length > 1 ? " GUESTS" : " GUEST"} (names if known)
+                </div>
+                {form.plusOneNames.map((name, i) => (
+                  <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.375rem" }}>
+                    <input
+                      className="form-input"
+                      value={name}
+                      onChange={(e) => updatePlusOneName(i, e.target.value)}
+                      placeholder={`Guest ${i + 1} name (optional)`}
+                      style={{ flex: 1 }}
+                    />
+                    {isUnlimited && form.plusOneNames.length > 1 && (
+                      <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }} onClick={() => removeUnlimitedGuest(i)}>✕</button>
+                    )}
+                  </div>
+                ))}
+                {isUnlimited && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={addUnlimitedGuest} style={{ marginTop: "0.25rem" }}>＋ Add another</button>
+                )}
+              </div>
+            )}
+
+            {/* RSVP override */}
             {isEdit && (
               <>
                 <div className="divider" />
@@ -132,7 +219,7 @@ function GuestModal({ event, guest, onClose, onSave }) {
                       <option value="no">Declined</option>
                     </select>
                   </div>
-                  {form.plusOneEligible && (
+                  {hasPlus && (
                     <div className="form-group">
                       <label>Plus One Status</label>
                       <select className="form-select" value={form.plusOneRsvpStatus} onChange={set("plusOneRsvpStatus")}>
@@ -143,7 +230,7 @@ function GuestModal({ event, guest, onClose, onSave }) {
                     </div>
                   )}
                 </div>
-                {(form.rsvpStatus === "yes" || form.rsvpStatus === "partial") && event.parts?.length > 1 && (
+                {(form.rsvpStatus === "yes" || form.rsvpStatus === "partial") && (event.parts || []).length > 1 && (
                   <div className="form-group">
                     <label>Attending Which Parts</label>
                     <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
@@ -163,7 +250,6 @@ function GuestModal({ event, guest, onClose, onSave }) {
               </>
             )}
 
-            {/* Notes */}
             <div className="form-group" style={{ marginTop: "0.25rem" }}>
               <label>Internal Notes</label>
               <textarea className="form-textarea" value={form.notes} onChange={set("notes")} placeholder="Any relevant notes about this guest..." style={{ minHeight: 70 }} />
@@ -184,10 +270,11 @@ export default function GuestManager() {
   const [event, setEvent] = useState(null);
   const [guests, setGuests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null); // null | "add" | guest object
+  const [modal, setModal] = useState(null);
   const [search, setSearch] = useState("");
   const [filterPart, setFilterPart] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterTag, setFilterTag] = useState("all");
   const csvRef = useRef();
 
   useEffect(() => {
@@ -201,11 +288,19 @@ export default function GuestManager() {
   }, [id]);
 
   const saveGuest = async (form, guestId) => {
+    const data = {
+      ...form,
+      plusOneEligible: parseInt(form.plusOneLimit, 10) !== 0,
+      plusOneLimit: parseInt(form.plusOneLimit, 10),
+      // Backward compat: keep single plusOneName from first entry
+      plusOneName: form.plusOneNames?.[0] || "",
+      updatedAt: serverTimestamp(),
+    };
     if (guestId) {
-      await updateDoc(doc(db, "guests", guestId), { ...form, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, "guests", guestId), data);
     } else {
       await addDoc(collection(db, "guests"), {
-        ...form,
+        ...data,
         eventId: id,
         rsvpToken: uuid(),
         rsvpStatus: "pending",
@@ -216,8 +311,6 @@ export default function GuestManager() {
         emailBounced: false,
         createdAt: serverTimestamp(),
       });
-      // Update event guest count
-      const q2 = query(collection(db, "guests"), where("eventId", "==", id));
     }
     setModal(null);
   };
@@ -227,7 +320,6 @@ export default function GuestManager() {
     await deleteDoc(doc(db, "guests", guestId));
   };
 
-  // CSV import
   const importCSV = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -242,6 +334,7 @@ export default function GuestManager() {
         const row = {};
         headers.forEach((h, j) => { row[h] = cells[j] || ""; });
         if (!row.email && !row.firstname) continue;
+        const hasPlus = (row.plusone || row["plus one"] || "").toLowerCase() === "yes";
         const ref = doc(collection(db, "guests"));
         batch.set(ref, {
           eventId: id,
@@ -251,9 +344,11 @@ export default function GuestManager() {
           email: row.email || "",
           staffPoc: row.staffpoc || row.poc || "",
           invitedParts: (event?.parts || []).map((p) => p.id),
-          plusOneEligible: (row.plusone || row["plus one"] || "").toLowerCase() === "yes",
+          plusOneEligible: hasPlus,
+          plusOneLimit: hasPlus ? 1 : 0,
           plusOneName: row.plusonename || "",
-          plusOneEmail: row.plusoneemail || "",
+          plusOneNames: hasPlus ? [row.plusonename || ""] : [""],
+          tags: [],
           notes: row.notes || "",
           rsvpToken: uuid(),
           rsvpStatus: "pending",
@@ -273,12 +368,15 @@ export default function GuestManager() {
     csvRef.current.value = "";
   };
 
+  const eventTags = event?.tags || [];
+
   const filtered = guests.filter((g) => {
     const name = `${g.title} ${g.firstName} ${g.lastName} ${g.email}`.toLowerCase();
     const matchSearch = !search || name.includes(search.toLowerCase());
     const matchPart = filterPart === "all" || (g.invitedParts || []).includes(filterPart);
     const matchStatus = filterStatus === "all" || g.rsvpStatus === filterStatus || (!g.rsvpStatus && filterStatus === "pending");
-    return matchSearch && matchPart && matchStatus;
+    const matchTag = filterTag === "all" || (g.tags || []).includes(filterTag);
+    return matchSearch && matchPart && matchStatus && matchTag;
   });
 
   if (!event) return <div className="loading">Loading...</div>;
@@ -297,12 +395,10 @@ export default function GuestManager() {
         </div>
       </div>
 
-      {/* CSV hint */}
       <div style={{ fontSize: "0.8rem", color: "var(--gray-400)", marginBottom: "1rem", background: "var(--gray-50)", padding: "0.5rem 0.875rem", borderRadius: "var(--radius)", border: "1px solid var(--gray-200)" }}>
-        CSV format: <code>First Name, Last Name, Title, Email, Staff POC, Plus One, Plus One Name, Notes</code>
+        CSV format: <code>First Name, Last Name, Title, Email, Staff POC, Plus One (yes/no), Plus One Name, Notes</code>
       </div>
 
-      {/* Filters */}
       <div className="guest-filters">
         <div className="search-input">
           <input className="form-input" placeholder="Search guests..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: "2rem" }} />
@@ -311,6 +407,12 @@ export default function GuestManager() {
           <select className="form-select" style={{ width: "auto" }} value={filterPart} onChange={(e) => setFilterPart(e.target.value)}>
             <option value="all">All parts</option>
             {event.parts.map((p) => <option key={p.id} value={p.id}>{p.name} only</option>)}
+          </select>
+        )}
+        {eventTags.length > 0 && (
+          <select className="form-select" style={{ width: "auto" }} value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
+            <option value="all">All tags</option>
+            {eventTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
         <select className="form-select" style={{ width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
@@ -340,55 +442,71 @@ export default function GuestManager() {
                 <th>Email</th>
                 {(event.parts || []).length > 1 && <th>Invited To</th>}
                 <th>Plus One</th>
+                {eventTags.length > 0 && <th>Tags</th>}
                 <th>POC</th>
                 <th>RSVP</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((g) => (
-                <tr key={g.id}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}</div>
-                    {g.notes && <div style={{ fontSize: "0.75rem", color: "var(--gray-400)", marginTop: "0.125rem" }}>📝 {g.notes.slice(0, 60)}{g.notes.length > 60 ? "..." : ""}</div>}
-                  </td>
-                  <td style={{ fontSize: "0.875rem", color: "var(--gray-600)" }}>{g.email}</td>
-                  {(event.parts || []).length > 1 && (
+              {filtered.map((g) => {
+                const plusLimit = g.plusOneLimit ?? (g.plusOneEligible ? 1 : 0);
+                return (
+                  <tr key={g.id}>
                     <td>
-                      <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                        {(g.invitedParts || []).map((pid) => {
-                          const part = event.parts.find((p) => p.id === pid);
-                          return part ? <span key={pid} className="tag" style={{ fontSize: "0.7rem" }}>{part.name}</span> : null;
-                        })}
+                      <div style={{ fontWeight: 600 }}>{g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}</div>
+                      {g.notes && <div style={{ fontSize: "0.75rem", color: "var(--gray-400)", marginTop: "0.125rem" }}>📝 {g.notes.slice(0, 60)}{g.notes.length > 60 ? "..." : ""}</div>}
+                    </td>
+                    <td style={{ fontSize: "0.875rem", color: "var(--gray-600)" }}>{g.email}</td>
+                    {(event.parts || []).length > 1 && (
+                      <td>
+                        <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                          {(g.invitedParts || []).map((pid) => {
+                            const part = event.parts.find((p) => p.id === pid);
+                            return part ? <span key={pid} className="tag" style={{ fontSize: "0.7rem" }}>{part.name}</span> : null;
+                          })}
+                        </div>
+                      </td>
+                    )}
+                    <td style={{ fontSize: "0.875rem" }}>
+                      {plusLimit !== 0 ? (
+                        <span style={{ color: "var(--gold)" }}>
+                          ✓ {plusLimit === -1 ? "Unlimited" : `Up to ${plusLimit}`}
+                          {(g.plusOneNames || []).filter(Boolean).length > 0 && (
+                            <div style={{ fontSize: "0.7rem", color: "var(--gray-400)" }}>
+                              {(g.plusOneNames || []).filter(Boolean).join(", ")}
+                            </div>
+                          )}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--gray-400)" }}>—</span>
+                      )}
+                    </td>
+                    {eventTags.length > 0 && (
+                      <td>
+                        <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                          {(g.tags || []).map((tid) => {
+                            const tag = eventTags.find((t) => t.id === tid);
+                            return tag ? <TagPill key={tid} tag={tag} /> : null;
+                          })}
+                        </div>
+                      </td>
+                    )}
+                    <td style={{ fontSize: "0.875rem", color: "var(--gray-600)" }}>{g.staffPoc || "—"}</td>
+                    <td>
+                      <span className={`badge ${RSVP_BADGE[g.rsvpStatus] || "badge-pending"}`}>
+                        {RSVP_STATUS_LABELS[g.rsvpStatus] || "Pending"}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: "0.375rem" }}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setModal(g)}>Edit</button>
+                        <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }} onClick={() => deleteGuest(g.id)}>Remove</button>
                       </div>
                     </td>
-                  )}
-                  <td style={{ fontSize: "0.875rem" }}>
-                    {g.plusOneEligible ? (
-                      <span style={{ color: "var(--gold)" }}>✓ {g.plusOneName ? `(${g.plusOneName})` : "eligible"}</span>
-                    ) : (
-                      <span style={{ color: "var(--gray-400)" }}>—</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: "0.875rem", color: "var(--gray-600)" }}>{g.staffPoc || "—"}</td>
-                  <td>
-                    <span className={`badge ${RSVP_BADGE[g.rsvpStatus] || "badge-pending"}`}>
-                      {RSVP_STATUS_LABELS[g.rsvpStatus] || "Pending"}
-                    </span>
-                    {g.rsvpStatus === "partial" && event.parts?.length > 1 && (
-                      <div style={{ fontSize: "0.7rem", color: "var(--gray-400)", marginTop: "0.25rem" }}>
-                        {(g.rsvpParts || []).map((pid) => event.parts.find((p) => p.id === pid)?.name).filter(Boolean).join(", ")}
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", gap: "0.375rem" }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setModal(g)}>Edit</button>
-                      <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }} onClick={() => deleteGuest(g.id)}>Remove</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

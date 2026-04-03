@@ -28,7 +28,7 @@ function resolveMerge(text, guest, event, baseUrl) {
     .replace(/{{rsvpLink}}/g, `${baseUrl}#/rsvp/${guest.rsvpToken}`);
 }
 
-function buildEmailHtml(subject, bodyText, guest, event, attachments, logoUrl, baseUrl) {
+function buildEmailHtml(bodyText, guest, event, attachments, logoUrl, baseUrl) {
   const resolved = resolveMerge(bodyText, guest, event, baseUrl);
   const rsvpLink = `${baseUrl}#/rsvp/${guest.rsvpToken}`;
   const attHtml = attachments.length
@@ -36,8 +36,7 @@ function buildEmailHtml(subject, bodyText, guest, event, attachments, logoUrl, b
         <strong>Attachments:</strong> ${attachments.map((a) => `<a href="${a.url}" style="color:#1B2B6B;">${a.name}</a>`).join(" &nbsp;|&nbsp; ")}
        </div>`
     : "";
-  return `
-<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"></head>
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"></head>
 <body style="margin:0;padding:0;background:#F4F6FB;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F6FB;padding:32px 16px;">
 <tr><td align="center">
@@ -61,30 +60,6 @@ function buildEmailHtml(subject, bodyText, guest, event, attachments, logoUrl, b
 </body></html>`;
 }
 
-async function sendEmailViaGraph(accessToken, senderEmail, toEmail, subject, htmlBody, attachments) {
-  const msgAttachments = await Promise.all(
-    attachments.map(async (a) => {
-      const resp = await fetch(a.url);
-      const buf = await resp.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-      return { "@odata.type": "#microsoft.graph.fileAttachment", name: a.name, contentBytes: b64 };
-    })
-  );
-  const body = {
-    message: {
-      subject,
-      body: { contentType: "HTML", content: htmlBody },
-      toRecipients: [{ emailAddress: { address: toEmail } }],
-      attachments: msgAttachments,
-    },
-  };
-  const resp = await fetch(
-    `https://graph.microsoft.com/v1.0/users/${senderEmail}/sendMail`,
-    { method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }
-  );
-  if (!resp.ok) throw new Error(`Graph API error: ${resp.status}`);
-}
-
 export default function InvitationComposer() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
@@ -94,11 +69,12 @@ export default function InvitationComposer() {
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState(null);
   const [uploadingFile, setUploadingFile] = useState(false);
-  const [selectedGuests, setSelectedGuests] = useState("unsent"); // "unsent" | "all" | "custom"
+  const [selectedGuests, setSelectedGuests] = useState("unsent");
+  const [filterTag, setFilterTag] = useState("all");
   const [customIds, setCustomIds] = useState(new Set());
-  const [tab, setTab] = useState("compose"); // "compose" | "recipients"
+  const [tab, setTab] = useState("compose");
 
-  const baseUrl = window.location.origin + window.location.pathname.replace(/index\.html$/, "");
+  const baseUrl = window.location.href.split("#")[0];
 
   useEffect(() => {
     getDoc(doc(db, "events", id)).then((s) => {
@@ -144,10 +120,17 @@ export default function InvitationComposer() {
   const removeAttachment = (name) =>
     setTemplate((t) => ({ ...t, attachments: t.attachments.filter((a) => a.name !== name) }));
 
+  const eventTags = event?.tags || [];
+
   const getTargetGuests = () => {
-    if (selectedGuests === "unsent") return guests.filter((g) => !g.emailSent);
-    if (selectedGuests === "all") return guests;
-    return guests.filter((g) => customIds.has(g.id));
+    let base;
+    if (selectedGuests === "unsent") base = guests.filter((g) => !g.emailSent);
+    else if (selectedGuests === "all") base = guests;
+    else if (selectedGuests === "attending") base = guests.filter((g) => g.rsvpStatus === "yes" || g.rsvpStatus === "partial");
+    else if (selectedGuests === "pending") base = guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending");
+    else base = guests.filter((g) => customIds.has(g.id));
+    if (filterTag !== "all") base = base.filter((g) => (g.tags || []).includes(filterTag));
+    return base;
   };
 
   const sendAll = async () => {
@@ -163,16 +146,13 @@ export default function InvitationComposer() {
 
     for (const guest of targets) {
       try {
-        const html = buildEmailHtml(template.subject, template.body, guest, event, template.attachments || [], logoUrl, baseUrl);
+        const html = buildEmailHtml(template.body, guest, event, template.attachments || [], logoUrl, baseUrl);
         const subject = resolveMerge(template.subject, guest, event, baseUrl);
-
         if (TEST_MODE) {
-          console.log(`[TEST MODE] Email to: ${guest.email}\nSubject: ${subject}\n---`);
-          await new Promise((r) => setTimeout(r, 100)); // small delay to simulate
+          console.log(`[TEST MODE] Email to: ${guest.email}\nSubject: ${subject}\nRSVP link: ${baseUrl}#/rsvp/${guest.rsvpToken}\n---`);
+          await new Promise((r) => setTimeout(r, 80));
         } else {
-          // TODO: Obtain Graph API access token via MSAL before calling this
-          // await sendEmailViaGraph(accessToken, GRAPH_CONFIG.senderEmail, guest.email, subject, html, template.attachments || []);
-          throw new Error("Graph API not yet configured. Set TEST_MODE = false and wire up MSAL token.");
+          throw new Error("Graph API not yet configured.");
         }
         await updateDoc(doc(db, "guests", guest.id), { emailSent: true, emailSentAt: serverTimestamp() });
         sent++;
@@ -189,7 +169,7 @@ export default function InvitationComposer() {
   const targets = getTargetGuests();
 
   const previewHtml = previewGuest
-    ? buildEmailHtml(template.subject, template.body, previewGuest, event, template.attachments || [], "./cspc-logo.png", baseUrl)
+    ? buildEmailHtml(template.body, previewGuest, event, template.attachments || [], "./cspc-logo.png", baseUrl)
     : "";
 
   return (
@@ -206,7 +186,6 @@ export default function InvitationComposer() {
           <strong>Test Mode:</strong> Emails will be logged to the browser console instead of sent. Toggle <code>TEST_MODE</code> in <code>firebase.js</code> once Graph API is configured.
         </div>
       )}
-
       {sendResult && (
         <div className={sendResult.failed === 0 ? "success-msg" : "error-msg"}>
           {sendResult.sent} email(s) sent{sendResult.failed > 0 ? `, ${sendResult.failed} failed (check console)` : ""}.
@@ -220,7 +199,6 @@ export default function InvitationComposer() {
 
       {tab === "compose" && (
         <div className="compose-layout">
-          {/* Left: editor */}
           <div>
             <div className="card" style={{ marginBottom: "1rem" }}>
               <div className="card-header"><h2>Email Content</h2></div>
@@ -233,20 +211,22 @@ export default function InvitationComposer() {
                   <label>Body Text</label>
                   <div className="merge-field-list">
                     {MERGE_FIELDS.map((m) => (
-                      <button key={m.token} type="button" className="btn btn-ghost btn-sm" style={{ fontSize: "0.7rem", padding: "0.1875rem 0.5rem", border: "1px solid var(--gray-200)" }}
+                      <button key={m.token} type="button" className="btn btn-ghost btn-sm"
+                        style={{ fontSize: "0.7rem", padding: "0.1875rem 0.5rem", border: "1px solid var(--gray-200)" }}
                         onClick={() => setTemplate((t) => ({ ...t, body: t.body + m.token }))}>
                         {m.label}
                       </button>
                     ))}
                   </div>
-                  <textarea className="form-textarea" style={{ minHeight: 220, marginTop: "0.5rem", fontFamily: "monospace", fontSize: "0.875rem" }}
-                    value={template.body} onChange={(e) => setTemplate((t) => ({ ...t, body: e.target.value }))} />
-                  <div className="form-hint">Use the buttons above to insert personalized fields into your email.</div>
+                  <textarea className="form-textarea"
+                    style={{ minHeight: 220, marginTop: "0.5rem", fontFamily: "monospace", fontSize: "0.875rem" }}
+                    value={template.body}
+                    onChange={(e) => setTemplate((t) => ({ ...t, body: e.target.value }))} />
+                  <div className="form-hint">Click a field above to insert it at the end of your text.</div>
                 </div>
               </div>
             </div>
 
-            {/* Attachments */}
             <div className="card" style={{ marginBottom: "1rem" }}>
               <div className="card-header"><h2>Attachments</h2></div>
               <div className="card-body">
@@ -268,27 +248,24 @@ export default function InvitationComposer() {
               </div>
             </div>
 
-            {/* Preview selector */}
             <div className="card">
               <div className="card-header"><h2>Preview As</h2></div>
               <div className="card-body">
-                <select className="form-select" value={previewGuest?.id || ""} onChange={(e) => setPreviewGuest(guests.find((g) => g.id === e.target.value))}>
+                <select className="form-select" value={previewGuest?.id || ""}
+                  onChange={(e) => setPreviewGuest(guests.find((g) => g.id === e.target.value))}>
                   {guests.map((g) => <option key={g.id} value={g.id}>{g.firstName} {g.lastName}</option>)}
                 </select>
               </div>
             </div>
           </div>
 
-          {/* Right: live preview */}
           <div>
             <div className="card" style={{ position: "sticky", top: "72px" }}>
               <div className="card-header"><h2>Email Preview</h2></div>
               <div className="card-body" style={{ padding: 0, overflow: "hidden", borderRadius: "0 0 6px 6px" }}>
-                {previewGuest ? (
-                  <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 500, border: "none" }} />
-                ) : (
-                  <div className="empty-state" style={{ padding: "2rem" }}>Add guests to preview</div>
-                )}
+                {previewGuest
+                  ? <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 520, border: "none" }} />
+                  : <div className="empty-state" style={{ padding: "2rem" }}>Add guests to preview</div>}
               </div>
             </div>
           </div>
@@ -300,11 +277,13 @@ export default function InvitationComposer() {
           <div className="card" style={{ marginBottom: "1.25rem" }}>
             <div className="card-header"><h2>Who to Send To</h2></div>
             <div className="card-body">
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1rem" }}>
                 {[
-                  { val: "unsent", label: `All guests who haven't been sent an email yet (${guests.filter((g) => !g.emailSent).length} guests)` },
-                  { val: "all", label: `All guests — resend to everyone (${guests.length} guests)` },
-                  { val: "custom", label: "Select specific guests" },
+                  { val: "unsent", label: `All guests who haven't received an email yet (${guests.filter((g) => !g.emailSent).length})` },
+                  { val: "all", label: `All guests — resend to everyone (${guests.length})` },
+                  { val: "attending", label: `Attending guests only (${guests.filter((g) => g.rsvpStatus === "yes" || g.rsvpStatus === "partial").length})` },
+                  { val: "pending", label: `Guests who haven't responded yet (${guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length})` },
+                  { val: "custom", label: "Select specific guests manually" },
                 ].map((opt) => (
                   <label key={opt.val} className="checkbox-label">
                     <input type="radio" name="sendTo" value={opt.val} checked={selectedGuests === opt.val} onChange={() => setSelectedGuests(opt.val)} />
@@ -313,22 +292,41 @@ export default function InvitationComposer() {
                 ))}
               </div>
 
-              {selectedGuests === "custom" && (
-                <div style={{ marginTop: "1rem" }}>
-                  <table className="data-table">
-                    <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {guests.map((g) => (
-                        <tr key={g.id}>
-                          <td><input type="checkbox" checked={customIds.has(g.id)} onChange={() => setCustomIds((s) => { const n = new Set(s); n.has(g.id) ? n.delete(g.id) : n.add(g.id); return n; })} /></td>
-                          <td>{g.firstName} {g.lastName}</td>
-                          <td style={{ fontSize: "0.875rem", color: "var(--gray-600)" }}>{g.email}</td>
-                          <td><span className={`badge ${g.emailSent ? "badge-sent" : "badge-pending"}`}>{g.emailSent ? "Sent" : "Not sent"}</span></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Tag filter */}
+              {eventTags.length > 0 && (
+                <div style={{ marginBottom: "1rem" }}>
+                  <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", marginBottom: "0.375rem" }}>FILTER BY TAG (optional)</div>
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <button className={`btn btn-sm ${filterTag === "all" ? "btn-primary" : "btn-ghost"}`} onClick={() => setFilterTag("all")}>All tags</button>
+                    {eventTags.map((tag) => (
+                      <button key={tag.id} onClick={() => setFilterTag(tag.id)}
+                        style={{
+                          padding: "0.3125rem 0.75rem", borderRadius: "99px", fontSize: "0.8125rem", fontWeight: 700, cursor: "pointer", border: "1.5px solid " + tag.color,
+                          background: filterTag === tag.id ? tag.color : tag.color + "22",
+                          color: filterTag === tag.id ? "white" : tag.color,
+                        }}>
+                        {tag.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              )}
+
+              {selectedGuests === "custom" && (
+                <table className="data-table" style={{ marginTop: "0.75rem" }}>
+                  <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {guests.map((g) => (
+                      <tr key={g.id}>
+                        <td><input type="checkbox" checked={customIds.has(g.id)}
+                          onChange={() => setCustomIds((s) => { const n = new Set(s); n.has(g.id) ? n.delete(g.id) : n.add(g.id); return n; })} /></td>
+                        <td>{g.firstName} {g.lastName}</td>
+                        <td style={{ fontSize: "0.875rem", color: "var(--gray-600)" }}>{g.email}</td>
+                        <td><span className={`badge ${g.emailSent ? "badge-sent" : "badge-pending"}`}>{g.emailSent ? "Sent" : "Not sent"}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
           </div>

@@ -13,7 +13,8 @@ export default function TrackingDashboard() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-  const [editingNote, setEditingNote] = useState(null); // guestId
+  const [filterTag, setFilterTag] = useState("all");
+  const [editingNote, setEditingNote] = useState(null);
   const [noteText, setNoteText] = useState("");
 
   useEffect(() => {
@@ -46,6 +47,8 @@ export default function TrackingDashboard() {
   const pending = guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length;
   const responded = attending + declined;
 
+  const eventTags = event.tags || [];
+
   const filtered = guests.filter((g) => {
     const name = `${g.firstName} ${g.lastName} ${g.email}`.toLowerCase();
     const matchSearch = !search || name.includes(search.toLowerCase());
@@ -58,13 +61,16 @@ export default function TrackingDashboard() {
       (filter === "not-opened" && g.emailSent && !g.emailOpened) ||
       (filter === "not-sent" && !g.emailSent) ||
       (filter === "bounced" && g.emailBounced);
-    return matchSearch && matchFilter;
+    const matchTag = filterTag === "all" || (g.tags || []).includes(filterTag);
+    return matchSearch && matchFilter && matchTag;
   });
 
-  // Per-part breakdown
   const partBreakdown = (event.parts || []).map((part) => {
     const invited = guests.filter((g) => (g.invitedParts || []).includes(part.id));
-    const att = invited.filter((g) => (g.rsvpParts || g.invitedParts || []).includes(part.id) && (g.rsvpStatus === "yes" || g.rsvpStatus === "partial"));
+    const att = guests.filter((g) =>
+      (g.rsvpStatus === "yes" || g.rsvpStatus === "partial") &&
+      (g.rsvpParts || g.invitedParts || []).includes(part.id)
+    );
     return { part, invited: invited.length, attending: att.length };
   });
 
@@ -77,8 +83,8 @@ export default function TrackingDashboard() {
         </div>
       </div>
 
-      {/* Top stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
+      {/* Stats row */}
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
         {[
           { label: "Invited", value: total, color: "var(--navy)" },
           { label: "Emails Sent", value: sent, color: "var(--navy)" },
@@ -96,7 +102,7 @@ export default function TrackingDashboard() {
         ))}
       </div>
 
-      {/* Response rate bar */}
+      {/* Response rate */}
       {sent > 0 && (
         <div className="card" style={{ marginBottom: "1.25rem" }}>
           <div className="card-body">
@@ -107,8 +113,7 @@ export default function TrackingDashboard() {
             <div className="progress-bar">
               <div className="progress-fill green" style={{ width: `${(responded / sent) * 100}%` }} />
             </div>
-
-            {(event.parts || []).length > 1 && partBreakdown.length > 0 && (
+            {(event.parts || []).length > 1 && (
               <div style={{ marginTop: "1rem", display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
                 {partBreakdown.map(({ part, invited, attending }) => (
                   <div key={part.id}>
@@ -125,8 +130,8 @@ export default function TrackingDashboard() {
         </div>
       )}
 
-      {/* Guest table */}
-      <div className="guest-filters">
+      {/* Filters */}
+      <div className="guest-filters" style={{ flexWrap: "wrap" }}>
         <div className="search-input">
           <input className="form-input" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: "2rem", width: 200 }} />
         </div>
@@ -140,6 +145,12 @@ export default function TrackingDashboard() {
           <option value="not-sent">Not yet sent</option>
           <option value="bounced">Bounced</option>
         </select>
+        {eventTags.length > 0 && (
+          <select className="form-select" style={{ width: "auto" }} value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
+            <option value="all">All tags</option>
+            {eventTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
         <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>{filtered.length} shown</span>
       </div>
 
@@ -152,6 +163,7 @@ export default function TrackingDashboard() {
               <tr>
                 <th>Name</th>
                 {(event.parts || []).length > 1 && <th>Invited Parts</th>}
+                {eventTags.length > 0 && <th>Tags</th>}
                 <th>Email Status</th>
                 <th>RSVP</th>
                 {(event.parts || []).length > 1 && <th>Attending</th>}
@@ -166,9 +178,9 @@ export default function TrackingDashboard() {
                   <td>
                     <div style={{ fontWeight: 600 }}>{g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}</div>
                     <div style={{ fontSize: "0.75rem", color: "var(--gray-400)" }}>{g.email}</div>
-                    {g.plusOneEligible && (
+                    {(g.plusOneLimit > 0 || g.plusOneEligible) && (
                       <div style={{ fontSize: "0.7rem", color: "var(--gold)", marginTop: "0.125rem" }}>
-                        +1: {g.plusOneName || "eligible"} — {g.plusOneRsvpStatus === "yes" ? "attending" : g.plusOneRsvpStatus === "no" ? "not attending" : "pending"}
+                        +1: {g.plusOneRsvpStatus === "yes" ? "attending" : g.plusOneRsvpStatus === "no" ? "not attending" : "pending"}
                       </div>
                     )}
                   </td>
@@ -182,16 +194,25 @@ export default function TrackingDashboard() {
                       </div>
                     </td>
                   )}
+                  {eventTags.length > 0 && (
+                    <td>
+                      <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                        {(g.tags || []).map((tid) => {
+                          const tag = eventTags.find((t) => t.id === tid);
+                          return tag ? (
+                            <span key={tid} style={{ display: "inline-flex", alignItems: "center", padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>
+                              {tag.name}
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                    </td>
+                  )}
                   <td>
-                    {!g.emailSent ? (
-                      <span className="badge badge-pending">Not sent</span>
-                    ) : g.emailBounced ? (
-                      <span className="badge badge-bounced">Bounced</span>
-                    ) : g.emailOpened ? (
-                      <span className="badge badge-opened">Opened</span>
-                    ) : (
-                      <span className="badge badge-sent">Sent</span>
-                    )}
+                    {!g.emailSent ? <span className="badge badge-pending">Not sent</span>
+                      : g.emailBounced ? <span className="badge badge-bounced">Bounced</span>
+                      : g.emailOpened ? <span className="badge badge-opened">Opened</span>
+                      : <span className="badge badge-sent">Sent</span>}
                     {g.rsvpOverridden && <div style={{ fontSize: "0.65rem", color: "var(--amber)", marginTop: "0.125rem" }}>Manual override</div>}
                   </td>
                   <td>
@@ -231,9 +252,7 @@ export default function TrackingDashboard() {
                           {g.notes || "—"}
                         </span>
                         <button className="btn btn-ghost btn-sm" style={{ padding: "0.125rem 0.375rem", flexShrink: 0 }}
-                          onClick={() => { setEditingNote(g.id); setNoteText(g.notes || ""); }}>
-                          ✏️
-                        </button>
+                          onClick={() => { setEditingNote(g.id); setNoteText(g.notes || ""); }}>✏️</button>
                       </div>
                     )}
                   </td>
