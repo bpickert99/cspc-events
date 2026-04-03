@@ -23,32 +23,48 @@ const TAG_COLORS = [
   "#7C3AED", "#0D9488", "#D97706", "#DB2777",
 ];
 
-// ─── Inline tag creator ────────────────────────────────────────────────────────
+// ─── Colored part tag based on RSVP response ──────────────────────────────────
+function PartTag({ part, guest }) {
+  const status = guest.rsvpStatus;
+  let bg, color;
+  if (!status || status === "pending") {
+    bg = "var(--navy-light)"; color = "var(--navy)";
+  } else if (status === "no") {
+    bg = "#FEE2E2"; color = "#B91C1C";
+  } else {
+    const attending = (guest.rsvpParts?.length ? guest.rsvpParts : guest.invitedParts || []).includes(part.id);
+    bg = attending ? "#DCFCE7" : "#FEE2E2";
+    color = attending ? "#15803D" : "#B91C1C";
+  }
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "0.1875rem 0.5625rem", borderRadius: "99px", background: bg, fontSize: "0.7rem", fontWeight: 700, color, transition: "var(--transition)" }}>
+      {part.name}
+    </span>
+  );
+}
+
+// ─── New tag form ─────────────────────────────────────────────────────────────
 function NewTagForm({ onAdd, onCancel }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState(TAG_COLORS[0]);
   const inputRef = useRef();
   useEffect(() => { inputRef.current?.focus(); }, []);
-
   const submit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
     onAdd({ id: uuid(), name: name.trim(), color });
   };
-
   return (
     <form onSubmit={submit} style={{ display: "flex", alignItems: "center", gap: "0.5rem", background: "var(--white)", border: "1.5px solid var(--navy)", borderRadius: "var(--radius)", padding: "0.375rem 0.625rem", boxShadow: "var(--shadow-sm)" }}>
-      <input ref={inputRef} value={name} onChange={(e) => setName(e.target.value)}
-        placeholder="Tag name..." maxLength={30}
-        style={{ border: "none", outline: "none", fontSize: "0.875rem", width: 120, color: "var(--gray-800)" }} />
+      <input ref={inputRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="Tag name..." maxLength={30}
+        style={{ border: "none", outline: "none", fontSize: "0.875rem", width: 120 }} />
       <div style={{ display: "flex", gap: "0.25rem" }}>
         {TAG_COLORS.map((c) => (
-          <button key={c} type="button"
-            onClick={() => setColor(c)}
-            style={{ width: 18, height: 18, borderRadius: "50%", background: c, border: color === c ? "2.5px solid var(--gray-800)" : "2px solid transparent", cursor: "pointer", flexShrink: 0 }} />
+          <button key={c} type="button" onClick={() => setColor(c)}
+            style={{ width: 18, height: 18, borderRadius: "50%", background: c, border: color === c ? "2.5px solid var(--gray-800)" : "2px solid transparent", cursor: "pointer" }} />
         ))}
       </div>
-      <div style={{ display: "inline-flex", alignItems: "center", padding: "0.125rem 0.5rem", borderRadius: "99px", background: color + "22", fontSize: "0.75rem", fontWeight: 700, color, minWidth: 40, justifyContent: "center" }}>
+      <div style={{ padding: "0.125rem 0.5rem", borderRadius: "99px", background: color + "22", fontSize: "0.75rem", fontWeight: 700, color, minWidth: 40, textAlign: "center" }}>
         {name || "Preview"}
       </div>
       <button type="submit" className="btn btn-primary btn-sm">Add</button>
@@ -57,7 +73,7 @@ function NewTagForm({ onAdd, onCancel }) {
   );
 }
 
-// ─── Guest modal ────────────────────────────────────────────────────────────────
+// ─── Guest modal ──────────────────────────────────────────────────────────────
 function GuestModal({ event, guest, onClose, onSave }) {
   const isEdit = Boolean(guest);
   const eventTags = event.tags || [];
@@ -68,6 +84,7 @@ function GuestModal({ event, guest, onClose, onSave }) {
     email: guest?.email || "",
     invitedParts: guest?.invitedParts || (event.parts || []).map((p) => p.id),
     plusOneLimit: String(guest?.plusOneLimit ?? (guest?.plusOneEligible ? "1" : "0")),
+    staffPlusOneNames: guest?.staffPlusOneNames || [""],
     staffPoc: guest?.staffPoc || "",
     notes: guest?.notes || "",
     tags: guest?.tags || [],
@@ -79,7 +96,31 @@ function GuestModal({ event, guest, onClose, onSave }) {
   const set = (f) => (e) => setForm((s) => ({ ...s, [f]: e.target.value }));
   const togglePart = (pid) => setForm((s) => ({ ...s, invitedParts: s.invitedParts.includes(pid) ? s.invitedParts.filter((x) => x !== pid) : [...s.invitedParts, pid] }));
   const toggleTag = (tid) => setForm((s) => ({ ...s, tags: s.tags.includes(tid) ? s.tags.filter((x) => x !== tid) : [...s.tags, tid] }));
-  const hasPlus = parseInt(form.plusOneLimit, 10) !== 0;
+
+  const limit = parseInt(form.plusOneLimit, 10);
+  const hasPlus = limit !== 0;
+
+  const updatePlusOneName = (i, val) => setForm((s) => {
+    const names = [...s.staffPlusOneNames];
+    names[i] = val;
+    return { ...s, staffPlusOneNames: names };
+  });
+
+  const syncNamesToLimit = (val) => {
+    const n = parseInt(val, 10);
+    setForm((s) => {
+      let names = [...s.staffPlusOneNames];
+      if (n > 0) {
+        while (names.length < n) names.push("");
+        names = names.slice(0, n);
+      } else if (n === -1) {
+        if (!names.length) names = [""];
+      } else {
+        names = [""];
+      }
+      return { ...s, plusOneLimit: val, staffPlusOneNames: names };
+    });
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -150,13 +191,32 @@ function GuestModal({ event, guest, onClose, onSave }) {
               </div>
             )}
 
+            {/* Plus one with staff-entered names */}
             <div className="form-group">
               <label>Plus One Allowance</label>
-              <select className="form-select" value={form.plusOneLimit} onChange={set("plusOneLimit")}>
+              <select className="form-select" value={form.plusOneLimit} onChange={(e) => syncNamesToLimit(e.target.value)}>
                 {PLUS_ONE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-              {hasPlus && <div className="form-hint">Guest will enter their plus one's name when they RSVP.</div>}
             </div>
+            {hasPlus && (
+              <div style={{ background: "var(--gold-light)", border: "1px solid rgba(201,168,76,.3)", borderRadius: "var(--radius)", padding: "0.875rem", marginBottom: "0.875rem" }}>
+                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Plus One Name(s) — optional, staff can pre-fill
+                </div>
+                {form.staffPlusOneNames.map((name, i) => (
+                  <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.375rem", alignItems: "center" }}>
+                    <input className="form-input" value={name} onChange={(e) => updatePlusOneName(i, e.target.value)}
+                      placeholder={`Plus one ${i + 1} name (optional)`} style={{ flex: 1 }} />
+                  </div>
+                ))}
+                {limit === -1 && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setForm((s) => ({ ...s, staffPlusOneNames: [...s.staffPlusOneNames, ""] }))}>
+                    ＋ Add another
+                  </button>
+                )}
+                <div className="form-hint" style={{ marginTop: "0.375rem" }}>Guest can also enter their plus one's name when they RSVP.</div>
+              </div>
+            )}
 
             {isEdit && (
               <>
@@ -215,7 +275,22 @@ function GuestModal({ event, guest, onClose, onSave }) {
   );
 }
 
-// ─── Main component ────────────────────────────────────────────────────────────
+// ─── Sort header ──────────────────────────────────────────────────────────────
+function SortTh({ field, label, sortField, sortDir, onSort }) {
+  const active = sortField === field;
+  return (
+    <th onClick={() => onSort(field)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
+        {label}
+        <span style={{ fontSize: "0.6rem", color: active ? "var(--navy)" : "var(--gray-300)" }}>
+          {active ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+        </span>
+      </span>
+    </th>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 export default function GuestManager() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
@@ -226,8 +301,10 @@ export default function GuestManager() {
   const [filterPart, setFilterPart] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterTag, setFilterTag] = useState("all");
-  const [quickTagMode, setQuickTagMode] = useState(null); // tag id being quick-applied
+  const [quickTagMode, setQuickTagMode] = useState(null);
   const [showNewTagForm, setShowNewTagForm] = useState(false);
+  const [sortField, setSortField] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const csvRef = useRef();
 
   useEffect(() => {
@@ -240,7 +317,12 @@ export default function GuestManager() {
     return unsub;
   }, [id]);
 
-  // ─── Tag management ──────────────────────────────────────────────────────────
+  const toggleSort = (field) => {
+    if (sortField === field) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  };
+
+  // ─── Tag management ────────────────────────────────────────────────────────
   const addTag = async (tag) => {
     const newTags = [...(event.tags || []), tag];
     await updateDoc(doc(db, "events", id), { tags: newTags });
@@ -253,31 +335,32 @@ export default function GuestManager() {
     const newTags = (event.tags || []).filter((t) => t.id !== tagId);
     await updateDoc(doc(db, "events", id), { tags: newTags });
     setEvent((e) => ({ ...e, tags: newTags }));
-    // Remove from all guests
     const affected = guests.filter((g) => (g.tags || []).includes(tagId));
     const batch = writeBatch(db);
-    affected.forEach((g) => {
-      batch.update(doc(db, "guests", g.id), { tags: (g.tags || []).filter((t) => t !== tagId) });
-    });
+    affected.forEach((g) => batch.update(doc(db, "guests", g.id), { tags: (g.tags || []).filter((t) => t !== tagId) }));
     await batch.commit();
     if (quickTagMode === tagId) setQuickTagMode(null);
     if (filterTag === tagId) setFilterTag("all");
   };
 
-  // Quick-tag: click a guest row to toggle a tag without opening the modal
   const handleQuickTag = async (guest) => {
     if (!quickTagMode) return;
     const currentTags = guest.tags || [];
-    const newTags = currentTags.includes(quickTagMode)
-      ? currentTags.filter((t) => t !== quickTagMode)
-      : [...currentTags, quickTagMode];
+    const newTags = currentTags.includes(quickTagMode) ? currentTags.filter((t) => t !== quickTagMode) : [...currentTags, quickTagMode];
     await updateDoc(doc(db, "guests", guest.id), { tags: newTags, updatedAt: serverTimestamp() });
   };
 
-  // ─── Guest CRUD ──────────────────────────────────────────────────────────────
+  // ─── Guest CRUD ────────────────────────────────────────────────────────────
   const saveGuest = async (form, guestId) => {
     const limit = parseInt(form.plusOneLimit, 10);
-    const data = { ...form, plusOneEligible: limit !== 0, plusOneLimit: limit, updatedAt: serverTimestamp() };
+    const data = {
+      ...form,
+      plusOneEligible: limit !== 0,
+      plusOneLimit: limit,
+      // Keep first name for backward compat
+      plusOneName: form.staffPlusOneNames?.[0] || "",
+      updatedAt: serverTimestamp(),
+    };
     if (guestId) {
       await updateDoc(doc(db, "guests", guestId), data);
     } else {
@@ -316,6 +399,7 @@ export default function GuestManager() {
           title: row.title || "", email: row.email || "", staffPoc: row.staffpoc || "",
           invitedParts: (event?.parts || []).map((p) => p.id),
           plusOneEligible: hasPlus, plusOneLimit: hasPlus ? 1 : 0,
+          staffPlusOneNames: [""], plusOneName: "",
           tags: [], notes: row.notes || "",
           rsvpToken: uuid(), rsvpStatus: "pending", rsvpParts: [], rsvpData: {},
           emailSent: false, emailOpened: false, emailBounced: false, createdAt: serverTimestamp(),
@@ -332,6 +416,7 @@ export default function GuestManager() {
   const eventTags = event?.tags || [];
   const quickTag = quickTagMode ? eventTags.find((t) => t.id === quickTagMode) : null;
 
+  // Filter
   const filtered = guests.filter((g) => {
     const name = `${g.title} ${g.firstName} ${g.lastName} ${g.email}`.toLowerCase();
     const matchSearch = !search || name.includes(search.toLowerCase());
@@ -341,7 +426,21 @@ export default function GuestManager() {
     return matchSearch && matchPart && matchStatus && matchTag;
   });
 
+  // Sort
+  const sorted = [...filtered].sort((a, b) => {
+    let va, vb;
+    if (sortField === "name") { va = `${a.lastName} ${a.firstName}`.toLowerCase(); vb = `${b.lastName} ${b.firstName}`.toLowerCase(); }
+    else if (sortField === "staffPoc") { va = (a.staffPoc || "zzz").toLowerCase(); vb = (b.staffPoc || "zzz").toLowerCase(); }
+    else if (sortField === "rsvpDate") { va = a.rsvpSubmittedAt?.seconds || 0; vb = b.rsvpSubmittedAt?.seconds || 0; }
+    else { va = ""; vb = ""; }
+    if (va < vb) return sortDir === "asc" ? -1 : 1;
+    if (va > vb) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
   if (!event) return <div className="loading">Loading...</div>;
+
+  const multiPart = (event.parts || []).length > 1;
 
   return (
     <div>
@@ -357,67 +456,40 @@ export default function GuestManager() {
         </div>
       </div>
 
-      {/* ─── Tag management bar ─────────────────────────────────────────────── */}
+      {/* ─── Tag bar ──────────────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: "1.25rem" }}>
         <div className="card-body" style={{ padding: "0.875rem 1.25rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", flexWrap: "wrap" }}>
             <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0 }}>Tags</span>
-
             {eventTags.map((tag) => (
-              <div key={tag.id} style={{ display: "flex", alignItems: "center", gap: 0 }}>
-                <button
-                  onClick={() => setQuickTagMode(quickTagMode === tag.id ? null : tag.id)}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: "0.3rem",
-                    padding: "0.25rem 0.625rem", borderRadius: "99px 0 0 99px",
-                    background: quickTagMode === tag.id ? tag.color : tag.color + "22",
-                    color: quickTagMode === tag.id ? "white" : tag.color,
-                    border: `1.5px solid ${tag.color}`, borderRight: "none",
-                    fontSize: "0.8125rem", fontWeight: 700, cursor: "pointer",
-                    transition: "var(--transition)",
-                  }}
-                  title={quickTagMode === tag.id ? "Click guests to toggle this tag · click again to exit" : "Click to enter quick-tag mode"}>
+              <div key={tag.id} style={{ display: "flex", alignItems: "center" }}>
+                <button onClick={() => setQuickTagMode(quickTagMode === tag.id ? null : tag.id)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", padding: "0.25rem 0.625rem", borderRadius: "99px 0 0 99px", background: quickTagMode === tag.id ? tag.color : tag.color + "22", color: quickTagMode === tag.id ? "white" : tag.color, border: `1.5px solid ${tag.color}`, borderRight: "none", fontSize: "0.8125rem", fontWeight: 700, cursor: "pointer", transition: "var(--transition)" }}
+                  title="Click to enter quick-tag mode">
                   {quickTagMode === tag.id ? "✦ " : ""}{tag.name}
-                  {quickTagMode === tag.id && (
-                    <span style={{ fontSize: "0.65rem", fontWeight: 400, marginLeft: "0.125rem" }}>
-                      ({guests.filter((g) => (g.tags || []).includes(tag.id)).length})
-                    </span>
-                  )}
+                  {quickTagMode === tag.id && <span style={{ fontSize: "0.65rem", fontWeight: 400 }}>({guests.filter((g) => (g.tags || []).includes(tag.id)).length})</span>}
                 </button>
-                <button
-                  onClick={() => deleteTag(tag.id)}
-                  style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    width: 24, height: 24, borderRadius: "0 99px 99px 0",
-                    background: tag.color + "22", color: tag.color,
-                    border: `1.5px solid ${tag.color}`, borderLeft: "none",
-                    fontSize: "0.65rem", cursor: "pointer", transition: "var(--transition)",
-                  }}
-                  title="Delete tag"
+                <button onClick={() => deleteTag(tag.id)}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: "0 99px 99px 0", background: tag.color + "22", color: tag.color, border: `1.5px solid ${tag.color}`, borderLeft: "none", fontSize: "0.65rem", cursor: "pointer" }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "#FEE2E2"; e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.borderColor = "var(--red)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = tag.color + "22"; e.currentTarget.style.color = tag.color; e.currentTarget.style.borderColor = tag.color; }}>
-                  ✕
-                </button>
+                  onMouseLeave={(e) => { e.currentTarget.style.background = tag.color + "22"; e.currentTarget.style.color = tag.color; e.currentTarget.style.borderColor = tag.color; }}>✕</button>
               </div>
             ))}
-
             {showNewTagForm
               ? <NewTagForm onAdd={addTag} onCancel={() => setShowNewTagForm(false)} />
               : <button className="btn btn-ghost btn-sm" style={{ border: "1.5px dashed var(--gray-300)", color: "var(--gray-500)" }} onClick={() => setShowNewTagForm(true)}>＋ New Tag</button>
             }
           </div>
-
-          {/* Quick-tag mode hint */}
           {quickTag && (
-            <div style={{ marginTop: "0.625rem", padding: "0.5rem 0.75rem", background: quickTag.color + "15", border: `1px solid ${quickTag.color}44`, borderRadius: "var(--radius)", fontSize: "0.8125rem", color: quickTag.color, fontWeight: 600 }}>
-              Quick-tag mode: <strong>{quickTag.name}</strong> — click any guest row to toggle this tag on or off.
-              <button onClick={() => setQuickTagMode(null)} style={{ marginLeft: "0.75rem", background: "none", border: "none", color: quickTag.color, cursor: "pointer", fontWeight: 700, fontSize: "0.8125rem" }}>Done</button>
+            <div style={{ marginTop: "0.625rem", padding: "0.4375rem 0.75rem", background: quickTag.color + "15", border: `1px solid ${quickTag.color}44`, borderRadius: "var(--radius)", fontSize: "0.8125rem", color: quickTag.color, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span>✦ Quick-tag mode: <strong>{quickTag.name}</strong> — click any guest row to toggle</span>
+              <button onClick={() => setQuickTagMode(null)} style={{ background: "none", border: "none", color: quickTag.color, cursor: "pointer", fontWeight: 700 }}>Done</button>
             </div>
           )}
         </div>
       </div>
 
-      {/* ─── Filters ────────────────────────────────────────────────────────── */}
+      {/* ─── Filters ──────────────────────────────────────────────────────── */}
       <div style={{ fontSize: "0.8rem", color: "var(--gray-400)", marginBottom: "1rem", background: "var(--gray-50)", padding: "0.5rem 0.875rem", borderRadius: "var(--radius)", border: "1px solid var(--gray-200)" }}>
         CSV: <code>First Name, Last Name, Title, Email, Staff POC, Plus One (yes/no), Notes</code>
       </div>
@@ -426,7 +498,7 @@ export default function GuestManager() {
         <div className="search-input">
           <input className="form-input" placeholder="Search guests..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: "2.125rem" }} />
         </div>
-        {(event.parts || []).length > 1 && (
+        {multiPart && (
           <select className="form-select" style={{ width: "auto" }} value={filterPart} onChange={(e) => setFilterPart(e.target.value)}>
             <option value="all">All parts</option>
             {event.parts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -445,94 +517,143 @@ export default function GuestManager() {
           <option value="partial">Partial</option>
           <option value="no">Declined</option>
         </select>
-        <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>{filtered.length} shown</span>
+        <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>{sorted.length} shown</span>
       </div>
 
-      {/* ─── Guest table ─────────────────────────────────────────────────────── */}
-      <div className="card">
+      {/* ─── Table ────────────────────────────────────────────────────────── */}
+      <div className="card" style={{ overflowX: "auto" }}>
         {loading ? (
           <div className="loading">Loading guests...</div>
-        ) : filtered.length === 0 ? (
+        ) : sorted.length === 0 ? (
           <div className="empty-state">
             <div className="icon">👥</div>
             <h3>{guests.length === 0 ? "No guests yet" : "No guests match filters"}</h3>
             {guests.length === 0 && <button className="btn btn-primary" style={{ marginTop: "1rem" }} onClick={() => setModal("add")}>Add First Guest</button>}
           </div>
         ) : (
-          <table className="data-table">
+          <table className="data-table" style={{ minWidth: 900 }}>
             <thead>
               <tr>
-                <th>Name</th>
+                <SortTh field="name" label="Name" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
                 <th>Email</th>
-                {(event.parts || []).length > 1 && <th>Invited To</th>}
+                {multiPart && <th>Invited To</th>}
                 <th>Plus One</th>
                 {eventTags.length > 0 && <th>Tags</th>}
-                <th>POC</th>
-                <th>RSVP</th>
+                <SortTh field="staffPoc" label="POC" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
+                <SortTh field="rsvpDate" label="RSVP" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((g) => {
+              {sorted.map((g) => {
                 const limit = g.plusOneLimit ?? (g.plusOneEligible ? 1 : 0);
                 const hasQuickTag = quickTagMode && (g.tags || []).includes(quickTagMode);
+                const dietary = g.rsvpData?.["Dietary restrictions"] || "";
+                // Resolve plus-one display name(s)
+                const plusOneNames = [];
+                if (g.plusOneRsvpName) plusOneNames.push({ name: g.plusOneRsvpName, source: "rsvp" });
+                else if (g.staffPlusOneNames?.filter(Boolean).length) {
+                  g.staffPlusOneNames.filter(Boolean).forEach((n) => plusOneNames.push({ name: n, source: "staff" }));
+                }
+                const showPlusOneRow = limit !== 0 && (g.plusOneRsvpStatus === "yes" || plusOneNames.length > 0);
+
                 return (
-                  <tr key={g.id}
-                    onClick={() => quickTagMode && handleQuickTag(g)}
-                    style={{
-                      cursor: quickTagMode ? "pointer" : "default",
-                      background: quickTagMode
-                        ? hasQuickTag ? (quickTag?.color + "18") : "transparent"
-                        : undefined,
-                      outline: quickTagMode && hasQuickTag ? `2px solid ${quickTag?.color}44` : undefined,
-                    }}>
-                    <td>
-                      <div style={{ fontWeight: 600, color: "var(--gray-800)" }}>{g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}</div>
-                      {g.notes && <div style={{ fontSize: "0.75rem", color: "var(--gray-400)", marginTop: "0.125rem" }}>📝 {g.notes.slice(0, 55)}{g.notes.length > 55 ? "…" : ""}</div>}
-                    </td>
-                    <td style={{ fontSize: "0.875rem", color: "var(--gray-500)" }}>{g.email}</td>
-                    {(event.parts || []).length > 1 && (
+                  <>
+                    {/* ─── Primary guest row ─── */}
+                    <tr key={g.id}
+                      onClick={() => quickTagMode && handleQuickTag(g)}
+                      style={{ cursor: quickTagMode ? "pointer" : "default", background: quickTagMode ? (hasQuickTag ? quickTag?.color + "18" : "transparent") : undefined }}>
                       <td>
-                        <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                          {(g.invitedParts || []).map((pid) => {
-                            const part = event.parts.find((p) => p.id === pid);
-                            return part ? <span key={pid} className="tag" style={{ fontSize: "0.7rem" }}>{part.name}</span> : null;
-                          })}
+                        <div style={{ fontWeight: 600, color: "var(--gray-800)" }}>{g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}</div>
+                        {dietary && <div style={{ fontSize: "0.7rem", color: "var(--amber)", marginTop: "0.125rem" }}>🍽 {dietary}</div>}
+                        {g.notes && <div style={{ fontSize: "0.7rem", color: "var(--gray-400)", marginTop: "0.0625rem" }}>📝 {g.notes.slice(0, 60)}{g.notes.length > 60 ? "…" : ""}</div>}
+                      </td>
+                      <td style={{ fontSize: "0.875rem", color: "var(--gray-500)" }}>{g.email}</td>
+                      {multiPart && (
+                        <td>
+                          <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                            {(g.invitedParts || []).map((pid) => {
+                              const part = event.parts.find((p) => p.id === pid);
+                              return part ? <PartTag key={pid} part={part} guest={g} /> : null;
+                            })}
+                          </div>
+                        </td>
+                      )}
+                      <td style={{ fontSize: "0.875rem" }}>
+                        {limit !== 0
+                          ? <span style={{ color: "var(--gold-dark)", fontWeight: 600, fontSize: "0.8125rem" }}>✓ {limit === -1 ? "Unlimited" : `Up to ${limit}`}</span>
+                          : <span style={{ color: "var(--gray-300)" }}>—</span>}
+                      </td>
+                      {eventTags.length > 0 && (
+                        <td>
+                          <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                            {(g.tags || []).map((tid) => {
+                              const tag = eventTags.find((t) => t.id === tid);
+                              return tag ? <span key={tid} style={{ padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>{tag.name}</span> : null;
+                            })}
+                          </div>
+                        </td>
+                      )}
+                      <td style={{ fontSize: "0.875rem", color: "var(--gray-500)" }}>{g.staffPoc || "—"}</td>
+                      <td>
+                        <span className={`badge ${RSVP_BADGE[g.rsvpStatus] || "badge-pending"}`}>
+                          {RSVP_STATUS_LABELS[g.rsvpStatus] || "Pending"}
+                        </span>
+                        {g.rsvpSubmittedAt && (
+                          <div style={{ fontSize: "0.65rem", color: "var(--gray-400)", marginTop: "0.125rem" }}>
+                            {(g.rsvpSubmittedAt.toDate ? g.rsvpSubmittedAt.toDate() : new Date(g.rsvpSubmittedAt)).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </div>
+                        )}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div style={{ display: "flex", gap: "0.375rem" }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setModal(g)}>Edit</button>
+                          <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }} onClick={() => deleteGuest(g.id)}>Remove</button>
                         </div>
                       </td>
+                    </tr>
+
+                    {/* ─── Plus one sub-row ─── */}
+                    {showPlusOneRow && plusOneNames.map((po, i) => (
+                      <tr key={`${g.id}_po_${i}`} style={{ background: "var(--gold-light)" }}>
+                        <td style={{ paddingLeft: "2.5rem" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <span style={{ color: "var(--gold-dark)", fontSize: "0.75rem", fontWeight: 700 }}>└ ＋1</span>
+                            <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--gray-700)" }}>{po.name}</span>
+                            {po.source === "staff" && <span style={{ fontSize: "0.65rem", color: "var(--gray-400)", fontStyle: "italic" }}>staff-entered</span>}
+                          </div>
+                          {g.rsvpData?.["Plus one dietary restrictions"] && (
+                            <div style={{ fontSize: "0.7rem", color: "var(--amber)", marginTop: "0.125rem", paddingLeft: "2rem" }}>🍽 {g.rsvpData["Plus one dietary restrictions"]}</div>
+                          )}
+                        </td>
+                        <td colSpan={multiPart ? 2 : 1} />
+                        <td>
+                          <span style={{ fontSize: "0.75rem", color: "var(--gold-dark)", fontWeight: 600 }}>+1 of {g.firstName} {g.lastName}</span>
+                        </td>
+                        <td colSpan={eventTags.length > 0 ? 2 : 1} />
+                        <td>
+                          <span className={`badge ${g.plusOneRsvpStatus === "yes" ? "badge-yes" : g.plusOneRsvpStatus === "no" ? "badge-no" : "badge-pending"}`}>
+                            {g.plusOneRsvpStatus === "yes" ? "Attending" : g.plusOneRsvpStatus === "no" ? "Declined" : "Pending"}
+                          </span>
+                        </td>
+                        <td />
+                      </tr>
+                    ))}
+                    {/* Show placeholder if plus-one eligible but no name yet */}
+                    {limit !== 0 && !showPlusOneRow && (
+                      <tr key={`${g.id}_po_placeholder`} style={{ background: "var(--gray-50)" }}>
+                        <td style={{ paddingLeft: "2.5rem" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <span style={{ color: "var(--gray-300)", fontSize: "0.75rem", fontWeight: 700 }}>└ ＋1</span>
+                            <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)", fontStyle: "italic" }}>
+                              {g.plusOneRsvpStatus === "no" ? "Not bringing a guest" : "Name not yet provided"}
+                            </span>
+                          </div>
+                        </td>
+                        <td colSpan={99} />
+                      </tr>
                     )}
-                    <td style={{ fontSize: "0.875rem" }}>
-                      {limit !== 0
-                        ? <span style={{ color: "var(--gold-dark)", fontWeight: 600 }}>✓ {limit === -1 ? "Unlimited" : `Up to ${limit}`}{g.plusOneRsvpName ? <span style={{ display: "block", fontSize: "0.7rem", color: "var(--gray-400)", fontWeight: 400 }}>{g.plusOneRsvpName}</span> : null}</span>
-                        : <span style={{ color: "var(--gray-300)" }}>—</span>}
-                    </td>
-                    {eventTags.length > 0 && (
-                      <td>
-                        <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                          {(g.tags || []).map((tid) => {
-                            const tag = eventTags.find((t) => t.id === tid);
-                            return tag ? (
-                              <span key={tid} style={{ display: "inline-flex", alignItems: "center", padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>
-                                {tag.name}
-                              </span>
-                            ) : null;
-                          })}
-                        </div>
-                      </td>
-                    )}
-                    <td style={{ fontSize: "0.875rem", color: "var(--gray-500)" }}>{g.staffPoc || "—"}</td>
-                    <td>
-                      <span className={`badge ${RSVP_BADGE[g.rsvpStatus] || "badge-pending"}`}>
-                        {RSVP_STATUS_LABELS[g.rsvpStatus] || "Pending"}
-                      </span>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: "flex", gap: "0.375rem" }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setModal(g)}>Edit</button>
-                        <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }} onClick={() => deleteGuest(g.id)}>Remove</button>
-                      </div>
-                    </td>
-                  </tr>
+                  </>
                 );
               })}
             </tbody>

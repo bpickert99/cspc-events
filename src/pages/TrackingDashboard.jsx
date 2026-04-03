@@ -46,7 +46,6 @@ export default function TrackingDashboard() {
   const declined = guests.filter((g) => g.rsvpStatus === "no").length;
   const pending = guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length;
   const responded = attending + declined;
-
   const eventTags = event.tags || [];
 
   const filtered = guests.filter((g) => {
@@ -78,12 +77,11 @@ export default function TrackingDashboard() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Tracking — {event.name}</h1>
-          <p>Monitor invitations, opens, and RSVP responses in real time.</p>
+          <h1>Tracking</h1>
+          <p>{event.name} · real-time RSVP monitoring</p>
         </div>
       </div>
 
-      {/* Stats row */}
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
         {[
           { label: "Invited", value: total, color: "var(--navy)" },
@@ -102,7 +100,6 @@ export default function TrackingDashboard() {
         ))}
       </div>
 
-      {/* Response rate */}
       {sent > 0 && (
         <div className="card" style={{ marginBottom: "1.25rem" }}>
           <div className="card-body">
@@ -130,7 +127,6 @@ export default function TrackingDashboard() {
         </div>
       )}
 
-      {/* Filters */}
       <div className="guest-filters" style={{ flexWrap: "wrap" }}>
         <div className="search-input">
           <input className="form-input" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: "2rem", width: 200 }} />
@@ -162,12 +158,12 @@ export default function TrackingDashboard() {
             <thead>
               <tr>
                 <th>Name</th>
-                {(event.parts || []).length > 1 && <th>Invited Parts</th>}
+                {(event.parts || []).length > 1 && <th>Invited To</th>}
                 {eventTags.length > 0 && <th>Tags</th>}
                 <th>Email Status</th>
                 <th>RSVP</th>
-                {(event.parts || []).length > 1 && <th>Attending</th>}
-                <th>Custom Responses</th>
+                {(event.parts || []).length > 1 && <th>Attending Parts</th>}
+                <th title="Answers submitted through the RSVP form (dietary restrictions, accessibility needs, etc.)">RSVP Form Answers ⓘ</th>
                 <th>Notes</th>
                 <th>Override</th>
               </tr>
@@ -178,9 +174,9 @@ export default function TrackingDashboard() {
                   <td>
                     <div style={{ fontWeight: 600 }}>{g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}</div>
                     <div style={{ fontSize: "0.75rem", color: "var(--gray-400)" }}>{g.email}</div>
-                    {(g.plusOneLimit > 0 || g.plusOneEligible) && (
-                      <div style={{ fontSize: "0.7rem", color: "var(--gold)", marginTop: "0.125rem" }}>
-                        +1: {g.plusOneRsvpStatus === "yes" ? "attending" : g.plusOneRsvpStatus === "no" ? "not attending" : "pending"}
+                    {(g.plusOneLimit > 0 || g.plusOneEligible) && g.plusOneRsvpStatus !== "no" && (
+                      <div style={{ fontSize: "0.7rem", color: "var(--gold-dark)", marginTop: "0.125rem" }}>
+                        +1: {g.plusOneRsvpName || "—"} ({g.plusOneRsvpStatus === "yes" ? "attending" : "pending"})
                       </div>
                     )}
                   </td>
@@ -199,11 +195,7 @@ export default function TrackingDashboard() {
                       <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
                         {(g.tags || []).map((tid) => {
                           const tag = eventTags.find((t) => t.id === tid);
-                          return tag ? (
-                            <span key={tid} style={{ display: "inline-flex", alignItems: "center", padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>
-                              {tag.name}
-                            </span>
-                          ) : null;
+                          return tag ? <span key={tid} style={{ padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>{tag.name}</span> : null;
                         })}
                       </div>
                     </td>
@@ -219,6 +211,11 @@ export default function TrackingDashboard() {
                     <span className={`badge ${STATUS_BADGE[g.rsvpStatus] || "badge-pending"}`}>
                       {STATUS_LABEL[g.rsvpStatus] || "Pending"}
                     </span>
+                    {g.rsvpSubmittedAt && (
+                      <div style={{ fontSize: "0.65rem", color: "var(--gray-400)", marginTop: "0.125rem" }}>
+                        {(g.rsvpSubmittedAt.toDate ? g.rsvpSubmittedAt.toDate() : new Date(g.rsvpSubmittedAt)).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </div>
+                    )}
                   </td>
                   {(event.parts || []).length > 1 && (
                     <td style={{ fontSize: "0.8125rem" }}>
@@ -227,15 +224,15 @@ export default function TrackingDashboard() {
                         : <span style={{ color: "var(--gray-400)" }}>—</span>}
                     </td>
                   )}
-                  <td style={{ fontSize: "0.8125rem", maxWidth: 160 }}>
+                  <td style={{ fontSize: "0.8125rem", maxWidth: 180 }}>
                     {g.rsvpData && Object.keys(g.rsvpData).length > 0
                       ? Object.entries(g.rsvpData).map(([k, v]) => (
                           <div key={k} style={{ marginBottom: "0.125rem" }}>
-                            <span style={{ color: "var(--gray-400)" }}>{k}: </span>
+                            <span style={{ color: "var(--gray-400)", fontSize: "0.7rem" }}>{k}: </span>
                             <span>{String(v)}</span>
                           </div>
                         ))
-                      : <span style={{ color: "var(--gray-400)" }}>—</span>}
+                      : <span style={{ color: "var(--gray-300)" }}>—</span>}
                   </td>
                   <td style={{ minWidth: 140 }}>
                     {editingNote === g.id ? (
