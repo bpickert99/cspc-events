@@ -11,7 +11,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyAqTzvSMlnoAzCREk-X4SKmht-I_vjeM80",
   authDomain: "cspc-events.firebaseapp.com",
   projectId: "cspc-events",
-  storageBucket: "cspc-events.firebasestorage.app",
+  storageBucket: "cspc-events-storage",
   messagingSenderId: "1007458426858",
   appId: "1:1007458426858:web:055efcef1f6bdbc17edc93"
 };

@@ -29,8 +29,17 @@ function resolveMerge(text, guest, event, baseUrl, buttonText) {
     : "TBD";
   const rsvpLink = `${baseUrl}#/rsvp/${guest.rsvpToken}`;
   const btnLabel = buttonText || "RSVP Now";
+  // VML fallback ensures the button renders in Outlook which ignores CSS backgrounds
   const rsvpButton = `<div style="text-align:center;margin:12px 0 4px;">
-    <a href="${rsvpLink}" style="display:inline-block;background:linear-gradient(135deg,#243580 0%,#0F1A45 100%);color:#FFFFFF;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:0.01em;">${btnLabel}</a>
+<!--[if mso]>
+<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${rsvpLink}" style="height:44px;v-text-anchor:middle;width:180px;" arcsize="18%" strokecolor="#0F1A45" fillcolor="#1B2B6B">
+<w:anchorlock/>
+<center style="color:#FFFFFF;font-family:sans-serif;font-size:15px;font-weight:700;">${btnLabel}</center>
+</v:roundrect>
+<![endif]-->
+<!--[if !mso]><!-->
+<a href="${rsvpLink}" style="display:inline-block;background:#1B2B6B;color:#FFFFFF;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:0.01em;mso-hide:all;">${btnLabel}</a>
+<!--<![endif]-->
   </div>`;
   return text
     .replace(/{{firstName}}/g, guest.firstName)
@@ -43,6 +52,9 @@ function resolveMerge(text, guest, event, baseUrl, buttonText) {
     .replace(/{{rsvpButton}}/g, rsvpButton)
     .replace(/{{rsvpLink}}/g, rsvpLink);
 }
+
+// Absolute logo URL — works in all email clients regardless of where the email is opened
+const LOGO_URL = "https://bpickert99.github.io/cspc-events/cspc-logo.png";
 
 function buildEmailHtml(bodyText, guest, event, attachments, logoUrl, baseUrl, buttonText) {
   const resolved = resolveMerge(bodyText, guest, event, baseUrl, buttonText);
@@ -181,8 +193,7 @@ export default function InvitationComposer() {
   const sendPreview = async () => {
     if (!previewGuest) return alert("No guest selected.");
     setSendingPreview(true); setPreviewResult(null);
-    const logoUrl = `${baseUrl}cspc-logo.png`;
-    const html = buildEmailHtml(template.body, previewGuest, event, template.attachments || [], logoUrl, baseUrl, template.buttonText);
+    const html = buildEmailHtml(template.body, previewGuest, event, template.attachments || [], LOGO_URL, baseUrl, template.buttonText);
     const subject = `[PREVIEW] ${resolveMerge(template.subject, previewGuest, event, baseUrl, template.buttonText)}`;
     const fromName = resolveFromName(previewGuest);
     if (TEST_MODE) {
@@ -207,7 +218,7 @@ export default function InvitationComposer() {
     if (!confirm(`Send to ${targets.length} guest(s)?`)) return;
     setSending(true); setSendResult(null);
     await saveTemplate();
-    const logoUrl = `${baseUrl}cspc-logo.png`;
+    const logoUrl = LOGO_URL;
     let sent = 0, failed = 0;
     for (const guest of targets) {
       try {
@@ -234,7 +245,7 @@ export default function InvitationComposer() {
 
   if (!event) return <div className="loading">Loading...</div>;
   const targets = getTargetGuests();
-  const previewHtml = previewGuest ? buildEmailHtml(template.body, previewGuest, event, template.attachments || [], "./cspc-logo.png", baseUrl, template.buttonText) : "";
+  const previewHtml = previewGuest ? buildEmailHtml(template.body, previewGuest, event, template.attachments || [], LOGO_URL, baseUrl, template.buttonText) : "";
   const previewFromName = previewGuest ? resolveFromName(previewGuest) : template.fromName;
 
   return (

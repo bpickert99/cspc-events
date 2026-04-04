@@ -6,8 +6,8 @@ import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, use
 import { CSS } from "@dnd-kit/utilities";
 import * as XLSX from "xlsx";
 
-// ─── Draggable guest chip (sidebar) ──────────────────────────────────────────
-function GuestChip({ guest }) {
+// ─── Draggable guest chip (used in both unassigned list AND seat slots) ────────
+function DraggableChip({ guest }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: guest.id });
   const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.35 : 1 };
   return (
@@ -15,61 +15,65 @@ function GuestChip({ guest }) {
       className={`guest-chip${guest.isPlusOne ? " plus-one" : ""}`}>
       <div>
         <div className="chip-name">{guest.displayName}</div>
-        {guest.isPlusOne && guest.primaryGuestName && (
-          <div className="chip-meta">+1 of {guest.primaryGuestName}</div>
+        {guest.isPlusOne && guest.primaryName && (
+          <div className="chip-plus-of">＋1 of {guest.primaryName}</div>
         )}
-        {guest.dietary && <div className="chip-meta">🍽 {guest.dietary}</div>}
+        {!guest.isPlusOne && guest.dietary && (
+          <div className="chip-meta">🍽 {guest.dietary}</div>
+        )}
       </div>
-      {guest.isPlusOne && <span style={{ fontSize: "0.65rem", color: "var(--gold-dark)", fontWeight: 700 }}>＋1</span>}
+      {guest.isPlusOne && <span style={{ fontSize: "0.65rem", color: "var(--gold)", fontWeight: 700, flexShrink: 0 }}>＋1</span>}
     </div>
   );
 }
 
-// ─── Draggable occupied seat content ─────────────────────────────────────────
-function DraggableSeatOccupant({ guest, seatKey, onRemove }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: guest.id });
-  const style = { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.35 : 1, cursor: "grab", width: "100%", display: "flex", flexDirection: "column", alignItems: "center" };
-  return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <div className="seat-guest">{guest.displayName}</div>
-      {guest.isPlusOne && guest.primaryGuestName && (
-        <div className="seat-plus-one-of">＋1 of {guest.primaryGuestName}</div>
-      )}
-    </div>
-  );
-}
+// ─── Droppable seat slot ────────────────────────────────────────────────────────
+function SeatSlot({ tableId, seatIndex, occupant, onRemove }) {
+  const slotId = `${tableId}__${seatIndex}`;
+  const { isOver, setNodeRef } = useDroppable({ id: slotId });
 
-// ─── Droppable seat slot ──────────────────────────────────────────────────────
-function SeatSlot({ tableId, seatIndex, occupant, allGuests, onRemove }) {
-  const { isOver, setNodeRef } = useDroppable({ id: `${tableId}__${seatIndex}` });
-  const isPlusOne = occupant?.isPlusOne;
   return (
-    <div ref={setNodeRef}
-      className={`seat-slot${occupant ? ` occupied${isPlusOne ? " plus-one" : ""}` : ""}${isOver ? " drag-over" : ""}`}>
+    <div
+      ref={setNodeRef}
+      className={`seat-slot${occupant ? ` occupied${occupant.isPlusOne ? " plus-one" : ""}` : ""}${isOver ? " drag-over" : ""}`}
+    >
       <span className="seat-number">{seatIndex + 1}</span>
       {occupant ? (
-        <>
-          <DraggableSeatOccupant guest={occupant} seatKey={`${tableId}__${seatIndex}`} onRemove={onRemove} />
-          <span className="seat-remove" onMouseDown={(e) => { e.stopPropagation(); onRemove(tableId, seatIndex); }}>✕</span>
-        </>
+        <DraggableChip guest={occupant} />
       ) : (
-        <span style={{ fontSize: "0.7125rem", color: "var(--gray-300)" }}>Empty</span>
+        <span style={{ fontSize: "0.75rem", color: "var(--gray-300)" }}>Empty</span>
       )}
+      {occupant && (
+        <span className="seat-remove" onClick={() => onRemove(tableId, seatIndex)} title="Unassign">✕</span>
+      )}
+    </div>
+  );
+}
+
+// ─── Droppable unassigned zone ──────────────────────────────────────────────────
+function UnassignedDropZone({ children }) {
+  const { isOver, setNodeRef } = useDroppable({ id: "unassigned-pool" });
+  return (
+    <div ref={setNodeRef} className="unassigned-list"
+      style={{ background: isOver ? "var(--navy-light)" : "", transition: "background 0.15s", minHeight: 60 }}>
+      {children}
     </div>
   );
 }
 
 export default function SeatingManager() {
   const { id } = useParams();
-  const [event, setEvent] = useState(null);
-  const [guests, setGuests] = useState([]);
+  const [event, setEvent]   = useState(null);
+  const [allGuests, setAllGuests] = useState([]); // full enriched list
+  const [guests, setGuests] = useState([]);        // filtered by selected part
+  const [selectedPart, setSelectedPart] = useState("all");
   const [tables, setTables] = useState([]);
   const [assignments, setAssignments] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [loading, setLoading]  = useState(true);
+  const [saving, setSaving]    = useState(false);
   const [draggingGuest, setDraggingGuest] = useState(null);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   useEffect(() => {
     (async () => {
@@ -80,49 +84,48 @@ export default function SeatingManager() {
       const guestSnap = await getDocs(query(collection(db, "guests"), where("eventId", "==", id)));
       const rawGuests = guestSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      // Build enriched list — declined guests excluded
+      // Build enriched list — ONLY guests who RSVPed yes
       const enriched = [];
       rawGuests.forEach((g) => {
-        if (g.rsvpStatus === "no") return;
+        if (g.rsvpStatus !== "yes") return; // only confirmed attendees
         enriched.push({
           id: g.id,
-          displayName: `${g.firstName} ${g.lastName}`,
-          title: g.title,
+          displayName: `${g.title ? g.title + " " : ""}${g.firstName} ${g.lastName}`.trim(),
           isPlusOne: false,
           primaryGuestId: null,
-          primaryGuestName: null,
+          primaryName: null,
           dietary: g.rsvpData?.["Dietary restrictions"] || "",
-          email: g.email,
+          invitedParts: g.rsvpParts?.length ? g.rsvpParts : (g.invitedParts || []),
         });
-        // Plus ones provided by guest during RSVP
-        const plusOneName = g.plusOneRsvpName || g.plusOneName;
-        if ((g.plusOneRsvpStatus === "yes" || g.plusOneEligible) && plusOneName) {
+        const plusName = g.plusOneRsvpName || (g.staffPlusOneNames?.filter(Boolean)[0] || "");
+        if (g.plusOneRsvpStatus === "yes" || (plusName && g.plusOneRsvpStatus !== "no")) {
           enriched.push({
-            id: `${g.id}_plus1`,
-            displayName: plusOneName,
+            id: `${g.id}_plus0`,
+            displayName: plusName || `${g.firstName} ${g.lastName}'s Guest`,
             isPlusOne: true,
             primaryGuestId: g.id,
-            primaryGuestName: `${g.firstName} ${g.lastName}`,
+            primaryName: `${g.firstName} ${g.lastName}`,
             dietary: g.rsvpData?.["Plus one dietary restrictions"] || "",
-            email: "",
+            invitedParts: g.rsvpParts?.length ? g.rsvpParts : (g.invitedParts || []),
           });
         }
       });
+      setAllGuests(enriched);
       setGuests(enriched);
 
+      // Load or create seating doc
       const seatSnap = await getDoc(doc(db, "seating", id));
       if (seatSnap.exists()) {
         setTables(seatSnap.data().tables || []);
         setAssignments(seatSnap.data().assignments || {});
       } else {
-        setTables(
-          Array.from({ length: 10 }, (_, i) => ({
-            id: `t${i + 1}`,
-            name: i === 0 ? "Head Table" : `Table ${i}`,
-            seats: 10,
-            isHeadTable: i === 0,
-          }))
-        );
+        // Default: 10 tables of 10
+        setTables(Array.from({ length: 10 }, (_, i) => ({
+          id: `t${i + 1}`,
+          name: i === 0 ? "Head Table" : `Table ${i}`,
+          seats: 10,
+          isHeadTable: i === 0,
+        })));
       }
       setLoading(false);
     })();
@@ -134,93 +137,73 @@ export default function SeatingManager() {
     setSaving(false);
   };
 
-  // ─── Excel export ──────────────────────────────────────────────────────────
-  const exportExcel = () => {
-    const rows = [];
-    tables.forEach((table) => {
-      for (let i = 0; i < table.seats; i++) {
-        const gid = assignments[`${table.id}__${i}`];
-        const guest = gid ? guests.find((g) => g.id === gid) : null;
-        rows.push({
-          Table: table.name,
-          Seat: i + 1,
-          Name: guest ? guest.displayName : "",
-          "Plus One Of": guest?.isPlusOne ? guest.primaryGuestName : "",
-          "Dietary Restrictions": guest?.dietary || "",
-          Email: guest?.email || "",
-          Status: guest ? (guest.isPlusOne ? "Plus One" : "Guest") : "Empty",
-        });
-      }
-    });
-
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [{ wch: 16 }, { wch: 6 }, { wch: 28 }, { wch: 24 }, { wch: 28 }, { wch: 32 }, { wch: 12 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Seating");
-    XLSX.writeFile(wb, `${event?.name || "Seating"} - Seating Chart.xlsx`);
-  };
+  // Filter guests by selected part
+  useEffect(() => {
+    if (selectedPart === "all") {
+      setGuests(allGuests);
+    } else {
+      setGuests(allGuests.filter((g) => (g.invitedParts || []).includes(selectedPart)));
+    }
+  }, [selectedPart, allGuests]);
 
   const assignedIds = new Set(Object.values(assignments));
-  const unassigned = guests.filter((g) => !assignedIds.has(g.id));
+  const unassigned  = guests.filter((g) => !assignedIds.has(g.id));
 
   const getOccupant = (tableId, seatIdx) => {
     const gid = assignments[`${tableId}__${seatIdx}`];
     return gid ? guests.find((g) => g.id === gid) : null;
   };
 
-  const onDragStart = ({ active }) => setDraggingGuest(guests.find((g) => g.id === active.id));
+  // ─── Drag handlers ──────────────────────────────────────────────────────────
+  const onDragStart = ({ active }) => {
+    setDraggingGuest(guests.find((g) => g.id === active.id) || null);
+  };
 
   const onDragEnd = ({ active, over }) => {
     setDraggingGuest(null);
     if (!over) return;
+    const guestId  = active.id;
+    const targetId = over.id;
 
-    // Dropped onto unassigned zone — remove from seat
-    if (over.id === "__unassigned__") {
-      const currentKey = Object.entries(assignments).find(([, v]) => v === active.id)?.[0];
-      if (currentKey) setAssignments((prev) => { const n = { ...prev }; delete n[currentKey]; return n; });
+    // Drop back to unassigned pool
+    if (targetId === "unassigned-pool") {
+      setAssignments((prev) => {
+        const next = { ...prev };
+        const curKey = Object.entries(next).find(([, v]) => v === guestId)?.[0];
+        if (curKey) delete next[curKey];
+        return next;
+      });
       return;
     }
 
-    if (!String(over.id).includes("__")) return;
-
-    const guestId = active.id;
-    const targetKey = String(over.id);
-    const existingInTarget = assignments[targetKey];
-
-    // Find where this guest currently is (could be a seat or unassigned)
+    if (!targetId.includes("__")) return;
+    const [targetTable, targetSeatStr] = targetId.split("__");
+    const targetIdx = parseInt(targetSeatStr, 10);
+    const existingInTarget = assignments[targetId];
     const currentKey = Object.entries(assignments).find(([, v]) => v === guestId)?.[0];
-
-    if (existingInTarget === guestId) return; // dropped on own seat
 
     setAssignments((prev) => {
       const next = { ...prev };
-
-      // If target occupied: swap
-      if (existingInTarget) {
-        if (currentKey) {
-          next[currentKey] = existingInTarget;
-        } else {
-          delete next[currentKey];
-        }
-      } else {
-        if (currentKey) delete next[currentKey];
+      // Swap if target occupied
+      if (existingInTarget && currentKey) {
+        next[currentKey] = existingInTarget;
+      } else if (currentKey) {
+        delete next[currentKey];
       }
+      next[targetId] = guestId;
 
-      next[targetKey] = guestId;
-
-      // Auto-place plus one adjacent if moving primary guest from unassigned
+      // Auto-place plus one in next available seat at same table (if from unassigned)
       if (!currentKey) {
         const guest = guests.find((g) => g.id === guestId);
         if (guest && !guest.isPlusOne) {
-          const plusOneId = `${guestId}_plus1`;
-          const plusOne = guests.find((g) => g.id === plusOneId);
-          if (plusOne && !assignedIds.has(plusOneId)) {
-            const [tbl] = targetKey.split("__");
-            const tableObj = tables.find((t) => t.id === tbl);
-            if (tableObj) {
-              for (let i = 0; i < tableObj.seats; i++) {
-                const key = `${tbl}__${i}`;
-                if (!next[key]) { next[key] = plusOneId; break; }
+          const plusId = `${guestId}_plus0`;
+          const plusGuest = guests.find((g) => g.id === plusId);
+          if (plusGuest && !assignedIds.has(plusId)) {
+            const tbl = tables.find((t) => t.id === targetTable);
+            if (tbl) {
+              for (let i = 0; i < tbl.seats; i++) {
+                const k = `${targetTable}__${i}`;
+                if (!next[k]) { next[k] = plusId; break; }
               }
             }
           }
@@ -230,17 +213,9 @@ export default function SeatingManager() {
     });
   };
 
-  const removeFromSeat = (tableId, seatIdx) => {
-    const key = `${tableId}__${seatIdx}`;
-    setAssignments((prev) => { const n = { ...prev }; delete n[key]; return n; });
-  };
-
-  const addTable = () => {
-    const n = tables.length + 1;
-    setTables((t) => [...t, { id: `t${Date.now()}`, name: `Table ${n}`, seats: 10, isHeadTable: false }]);
-  };
+  // ─── Table management ───────────────────────────────────────────────────────
+  const addTable = () => setTables((t) => [...t, { id: `t${Date.now()}`, name: `Table ${t.length}`, seats: 10, isHeadTable: false }]);
   const removeTable = (tid) => {
-    if (!confirm("Remove this table? Guests will return to unassigned.")) return;
     setTables((t) => t.filter((x) => x.id !== tid));
     setAssignments((a) => {
       const n = { ...a };
@@ -250,12 +225,41 @@ export default function SeatingManager() {
   };
   const updateTable = (tid, field, val) => setTables((t) => t.map((x) => x.id === tid ? { ...x, [field]: val } : x));
 
+  // ─── Excel export ────────────────────────────────────────────────────────────
+  const exportExcel = () => {
+    const rows = [["Table", "Seat #", "Name", "Plus One of", "Dietary Restrictions", "RSVP Status"]];
+    tables.forEach((table) => {
+      for (let i = 0; i < table.seats; i++) {
+        const occupant = getOccupant(table.id, i);
+        if (occupant) {
+          rows.push([
+            table.name,
+            i + 1,
+            occupant.displayName,
+            occupant.isPlusOne ? occupant.primaryName : "",
+            occupant.dietary || "",
+            occupant.isPlusOne ? "Plus One" : "Attending",
+          ]);
+        } else {
+          rows.push([table.name, i + 1, "", "", "", ""]);
+        }
+      }
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 18 }, { wch: 8 }, { wch: 30 }, { wch: 25 }, { wch: 30 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Seating");
+    XLSX.writeFile(wb, `${event?.name || "seating"}_seating.xlsx`);
+  };
+
   if (loading) return <div className="loading">Loading seating...</div>;
+
   if (!event?.hasSeating) return (
     <div className="empty-state" style={{ padding: "4rem" }}>
       <div className="icon">🪑</div>
-      <h3>Seating not enabled</h3>
-      <p>Edit the event and check "This event has assigned seating."</p>
+      <h3>Seating not enabled for this event</h3>
+      <p style={{ marginTop: "0.5rem" }}>Edit the event and check "This event has assigned seating" to enable the seating manager.</p>
     </div>
   );
 
@@ -263,8 +267,8 @@ export default function SeatingManager() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Seating</h1>
-          <p>{event.name} · {unassigned.length} unassigned · {Object.keys(assignments).length} seated</p>
+          <h1>Seating — {event.name}</h1>
+          <p>Only confirmed (RSVPed) guests appear here. Drag between seats or back to unassigned.</p>
         </div>
         <div className="page-actions">
           <button className="btn btn-secondary btn-sm" onClick={exportExcel}>⬇ Export Excel</button>
@@ -273,36 +277,41 @@ export default function SeatingManager() {
         </div>
       </div>
 
-      <div style={{ marginBottom: "0.875rem", display: "flex", gap: "1.25rem", alignItems: "center", fontSize: "0.8125rem" }}>
+      <div style={{ marginBottom: "0.75rem", display: "flex", gap: "1.25rem", flexWrap: "wrap", fontSize: "0.8125rem", color: "var(--gray-500)", alignItems: "center" }}>
         <span style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
-          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--gray-200)", border: "1.5px solid var(--gray-300)" }} />
-          <span style={{ color: "var(--gray-500)" }}>Guest</span>
+          <span style={{ width: 12, height: 12, borderRadius: 2, background: "var(--navy)", display: "inline-block" }} /> Guest
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
-          <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--gold-light)", border: "1.5px solid var(--gold)" }} />
-          <span style={{ color: "var(--gray-500)" }}>Plus one</span>
+          <span style={{ width: 12, height: 12, borderRadius: 2, background: "var(--gold)", display: "inline-block" }} /> Plus one
         </span>
-        <span style={{ color: "var(--gray-400)" }}>Drag guests between seats or back to unassigned list</span>
+        {(event.parts || []).length > 1 && (
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span style={{ fontWeight: 600, color: "var(--gray-600)" }}>Seating for:</span>
+            <div style={{ display: "flex", gap: "0.375rem" }}>
+              <button className={`btn btn-sm ${selectedPart === "all" ? "btn-primary" : "btn-secondary"}`} onClick={() => setSelectedPart("all")}>All parts</button>
+              {event.parts.map((p) => (
+                <button key={p.id} className={`btn btn-sm ${selectedPart === p.id ? "btn-primary" : "btn-secondary"}`} onClick={() => setSelectedPart(p.id)}>{p.name}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        <span style={{ marginLeft: "auto" }}>
+          {allGuests.length} confirmed · {unassigned.length} unassigned · {Object.keys(assignments).length} seated
+          {allGuests.length === 0 && <span style={{ color: "var(--amber)", marginLeft: "0.5rem" }}>— No confirmed RSVPs yet</span>}
+        </span>
       </div>
 
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="seating-layout">
-          {/* Unassigned list */}
+          {/* Unassigned sidebar */}
           <div className="seating-sidebar">
-            <div className="seating-sidebar-header">
-              Unassigned <span style={{ fontWeight: 400, color: "var(--gray-400)" }}>({unassigned.length})</span>
-            </div>
-            {/* Make sidebar itself a drop target so guests can be dragged back */}
+            <div className="seating-sidebar-header">Unassigned ({unassigned.length})</div>
             <UnassignedDropZone>
-              <div className="unassigned-list">
-                {unassigned.length === 0 ? (
-                  <div style={{ padding: "1.5rem 1rem", fontSize: "0.8125rem", color: "var(--gray-400)", textAlign: "center" }}>
-                    All guests seated ✓
-                  </div>
-                ) : (
-                  unassigned.map((g) => <GuestChip key={g.id} guest={g} />)
-                )}
-              </div>
+              {unassigned.length === 0 ? (
+                <div style={{ padding: "1rem", fontSize: "0.8125rem", color: "var(--gray-400)", textAlign: "center" }}>All guests seated ✓</div>
+              ) : (
+                unassigned.map((g) => <DraggableChip key={g.id} guest={g} />)
+              )}
             </UnassignedDropZone>
           </div>
 
@@ -312,13 +321,11 @@ export default function SeatingManager() {
               <div key={table.id} className={`table-block${table.isHeadTable ? " head-table" : ""}`}>
                 <div className="table-header">
                   <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
-                    <input
-                      className="form-input"
-                      value={table.name}
+                    <input className="form-input" value={table.name}
                       onChange={(e) => updateTable(table.id, "name", e.target.value)}
-                      style={{ width: 140, padding: "0.1875rem 0.5rem", fontSize: "0.875rem", fontWeight: 700, border: "1px solid transparent", borderRadius: "var(--radius-sm)", background: "transparent" }}
-                      onFocus={(e) => { e.target.style.border = "1px solid var(--navy)"; e.target.style.background = "white"; }}
-                      onBlur={(e) => { e.target.style.border = "1px solid transparent"; e.target.style.background = "transparent"; }}
+                      style={{ width: 150, padding: "0.25rem 0.5rem", fontSize: "0.875rem", fontWeight: 700, border: "1.5px solid transparent", background: "transparent" }}
+                      onFocus={(e) => { e.target.style.border = "1.5px solid var(--navy)"; e.target.style.background = "white"; }}
+                      onBlur={(e) => { e.target.style.border = "1.5px solid transparent"; e.target.style.background = "transparent"; }}
                     />
                     <label className="checkbox-label" style={{ fontSize: "0.75rem" }}>
                       <input type="checkbox" checked={table.isHeadTable} onChange={(e) => updateTable(table.id, "isHeadTable", e.target.checked)} />
@@ -326,24 +333,25 @@ export default function SeatingManager() {
                     </label>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
-                    <span style={{ fontSize: "0.75rem", color: "var(--gray-400)" }}>
-                      {Array.from({ length: table.seats }, (_, i) => assignments[`${table.id}__${i}`]).filter(Boolean).length}/{table.seats} seated
-                    </span>
-                    <label style={{ fontSize: "0.75rem", color: "var(--gray-500)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
-                      Seats:
-                      <input type="number" min={1} max={30} value={table.seats}
-                        onChange={(e) => updateTable(table.id, "seats", parseInt(e.target.value, 10) || 1)}
-                        style={{ width: 48, padding: "0.125rem 0.375rem", fontSize: "0.875rem", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-sm)" }} />
-                    </label>
-                    <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)", padding: "0.1875rem 0.5rem" }} onClick={() => removeTable(table.id)}>✕</button>
+                    <label style={{ fontSize: "0.75rem", color: "var(--gray-400)", fontWeight: 600 }}>Seats:</label>
+                    <input type="number" min={1} max={40} value={table.seats}
+                      onChange={(e) => updateTable(table.id, "seats", parseInt(e.target.value, 10) || 1)}
+                      className="form-input"
+                      style={{ width: 60, padding: "0.25rem 0.5rem", fontSize: "0.875rem", textAlign: "center" }}
+                    />
+                    <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)" }}
+                      onClick={() => { if (confirm(`Remove ${table.name}?`)) removeTable(table.id); }}>✕</button>
                   </div>
                 </div>
                 <div className="table-seats">
                   {Array.from({ length: table.seats }, (_, i) => (
                     <SeatSlot key={i} tableId={table.id} seatIndex={i}
                       occupant={getOccupant(table.id, i)}
-                      allGuests={guests}
-                      onRemove={removeFromSeat} />
+                      onRemove={(tid, si) => {
+                        const key = `${tid}__${si}`;
+                        setAssignments((prev) => { const n = { ...prev }; delete n[key]; return n; });
+                      }}
+                    />
                   ))}
                 </div>
               </div>
@@ -353,27 +361,18 @@ export default function SeatingManager() {
 
         <DragOverlay>
           {draggingGuest && (
-            <div className={`guest-chip${draggingGuest.isPlusOne ? " plus-one" : ""}`} style={{ boxShadow: "var(--shadow-md)", cursor: "grabbing", opacity: 0.95 }}>
+            <div className={`guest-chip${draggingGuest.isPlusOne ? " plus-one" : ""}`}
+              style={{ boxShadow: "var(--shadow-lg)", cursor: "grabbing", opacity: 0.95 }}>
               <div>
                 <div className="chip-name">{draggingGuest.displayName}</div>
-                {draggingGuest.isPlusOne && draggingGuest.primaryGuestName && (
-                  <div className="chip-meta">+1 of {draggingGuest.primaryGuestName}</div>
+                {draggingGuest.isPlusOne && draggingGuest.primaryName && (
+                  <div className="chip-plus-of">＋1 of {draggingGuest.primaryName}</div>
                 )}
               </div>
             </div>
           )}
         </DragOverlay>
       </DndContext>
-    </div>
-  );
-}
-
-// Drop zone for unassigning guests by dragging back to sidebar
-function UnassignedDropZone({ children }) {
-  const { setNodeRef, isOver } = useDroppable({ id: "__unassigned__" });
-  return (
-    <div ref={setNodeRef} style={{ flex: 1, display: "flex", flexDirection: "column", background: isOver ? "var(--navy-xlight)" : "transparent", transition: "background 0.15s" }}>
-      {children}
     </div>
   );
 }

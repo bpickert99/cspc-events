@@ -173,7 +173,7 @@ export default function RSVPPage() {
 
   const setCustom = (label, val) => setCustomFields((s) => ({ ...s, [label]: val }));
 
-  const logoPath = "../cspc-logo.png";
+  const logoPath = "https://bpickert99.github.io/cspc-events/cspc-logo.png";
 
   if (state === "loading") return (
     <div className="rsvp-page"><div className="rsvp-header"><img src={logoPath} alt="CSPC" /></div>
