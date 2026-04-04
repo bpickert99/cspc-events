@@ -5,6 +5,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { db, storage, TEST_MODE, EMAILJS_CONFIG } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
 import emailjs from "@emailjs/browser";
+import EmailDesigner, { blocksToHtml, createBlock } from "../components/EmailDesigner";
 
 // ─── Open tracking pixel URL ──────────────────────────────────────────────────
 // Once Cloudflare Worker is set up, replace this with your worker URL:
@@ -53,8 +54,40 @@ function resolveMerge(text, guest, event, baseUrl, buttonText) {
     .replace(/{{rsvpLink}}/g, rsvpLink);
 }
 
-// Absolute logo URL — works in all email clients regardless of where the email is opened
+// Absolute logo URL
 const LOGO_URL = "https://bpickert99.github.io/cspc-events/cspc-logo.png";
+
+// Wraps already-resolved body HTML in the email chrome (header + footer)
+function buildEmailHtmlWrapper(bodyHtml, guest, attachments) {
+  const pixelHtml = TRACKING_PIXEL_URL && guest
+    ? `<img src="${TRACKING_PIXEL_URL.replace("{{guestId}}", guest.id)}" width="1" height="1" style="display:none;" alt="" />`
+    : "";
+  const attHtml = attachments.length
+    ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #E4E8F0;font-size:13px;color:#6B7A99;">
+        <strong>Attachments:</strong> ${attachments.map((a) => `<a href="${a.url}" style="color:#1B2B6B;">${a.name}</a>`).join(" &nbsp;|&nbsp; ")}
+       </div>`
+    : "";
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"></head>
+<body style="margin:0;padding:0;background:#F6F8FC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+${pixelHtml}
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F8FC;padding:32px 16px;">
+<tr><td align="center">
+<table width="580" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(15,26,69,.10);">
+  <tr><td style="background:linear-gradient(135deg,#080F2E 0%,#1B2B6B 100%);padding:22px 32px;text-align:center;">
+    <img src="${LOGO_URL}" alt="CSPC" style="height:38px;filter:brightness(0) invert(1);" />
+  </td></tr>
+  <tr><td style="padding:28px 36px;color:#1A202C;font-size:15px;line-height:1.75;">
+    ${bodyHtml}
+    ${attHtml}
+  </td></tr>
+  <tr><td style="background:#F6F8FC;padding:14px 36px;text-align:center;font-size:12px;color:#94A0B8;border-top:1px solid #E4E8F0;">
+    Center for the Study of the Presidency and Congress &nbsp;·&nbsp; Washington, D.C.<br>
+    601 13th Street NW, Suite 940N, Washington, DC 20005
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+}
 
 function buildEmailHtml(bodyText, guest, event, attachments, logoUrl, baseUrl, buttonText) {
   const resolved = resolveMerge(bodyText, guest, event, baseUrl, buttonText);
@@ -97,6 +130,8 @@ export default function InvitationComposer() {
   const [event, setEvent] = useState(null);
   const [guests, setGuests] = useState([]);
   const [template, setTemplate] = useState({ subject: "", body: "", fromName: "CSPC Events", fromStaffPoc: false, buttonText: "RSVP Now", attachments: [] });
+  const [blocks, setBlocks] = useState(null); // null = not yet loaded
+  const [editorMode, setEditorMode] = useState("designer"); // "designer" | "simple"
   const [previewGuest, setPreviewGuest] = useState(null);
   const [sending, setSending] = useState(false);
   const [sendingPreview, setSendingPreview] = useState(false);
@@ -119,7 +154,24 @@ export default function InvitationComposer() {
         setTemplate((t) => ({ ...t, subject: t.subject || `You're invited: ${ev.name}`, body: t.body || DEFAULT_BODY(ev) }));
       }
     });
-    getDoc(doc(db, "emailTemplates", id)).then((s) => { if (s.exists()) setTemplate((prev) => ({ ...prev, ...s.data() })); });
+    getDoc(doc(db, "emailTemplates", id)).then((s) => {
+      if (s.exists()) {
+        const data = s.data();
+        setTemplate((prev) => ({ ...prev, ...data }));
+        // Load saved blocks if they exist
+        if (data.blocks && data.blocks.length > 0) {
+          setBlocks(data.blocks);
+        } else {
+          // Default blocks
+          setBlocks([
+            createBlock("text"),
+            createBlock("button"),
+          ]);
+        }
+      } else {
+        setBlocks([createBlock("text"), createBlock("button")]);
+      }
+    });
     getDocs(query(collection(db, "guests"), where("eventId", "==", id))).then((snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setGuests(list);
@@ -133,7 +185,24 @@ export default function InvitationComposer() {
   };
 
   const saveTemplate = async () => {
-    await setDoc(doc(db, "emailTemplates", id), { ...template, updatedAt: serverTimestamp() });
+    await setDoc(doc(db, "emailTemplates", id), { ...template, blocks: blocks || [], updatedAt: serverTimestamp() });
+  };
+
+  // Get the final HTML body — from blocks in designer mode, from textarea in simple mode
+  const getBodyHtml = (guest) => {
+    if (editorMode === "designer" && blocks && blocks.length > 0) {
+      const resolver = (text) => text
+        .replace(/{{firstName}}/g, guest.firstName)
+        .replace(/{{lastName}}/g, guest.lastName)
+        .replace(/{{fullName}}/g, `${guest.title ? guest.title + " " : ""}${guest.firstName} ${guest.lastName}`.trim())
+        .replace(/{{staffPOC}}/g, guest.staffPoc || "")
+        .replace(/{{eventName}}/g, event.name)
+        .replace(/{{eventDate}}/g, event.date ? (event.date.toDate ? event.date.toDate() : new Date(event.date)).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }) : "TBD")
+        .replace(/{{eventLocation}}/g, event.location || "")
+        .replace(/{{rsvpLink}}/g, `${baseUrl}#/rsvp/${guest.rsvpToken}`);
+      return blocksToHtml(blocks, resolver);
+    }
+    return null; // fall back to template.body via resolveMerge
   };
 
   // Fixed upload using uploadBytesResumable with progress tracking
@@ -193,7 +262,11 @@ export default function InvitationComposer() {
   const sendPreview = async () => {
     if (!previewGuest) return alert("No guest selected.");
     setSendingPreview(true); setPreviewResult(null);
-    const html = buildEmailHtml(template.body, previewGuest, event, template.attachments || [], LOGO_URL, baseUrl, template.buttonText);
+    const blockBody = getBodyHtml(previewGuest);
+    const bodyForEmail = blockBody !== null
+      ? `<div>${blockBody}</div>`
+      : resolveMerge(template.body, previewGuest, event, baseUrl, template.buttonText);
+    const html = buildEmailHtmlWrapper(bodyForEmail, previewGuest, template.attachments || []);
     const subject = `[PREVIEW] ${resolveMerge(template.subject, previewGuest, event, baseUrl, template.buttonText)}`;
     const fromName = resolveFromName(previewGuest);
     if (TEST_MODE) {
@@ -218,12 +291,15 @@ export default function InvitationComposer() {
     if (!confirm(`Send to ${targets.length} guest(s)?`)) return;
     setSending(true); setSendResult(null);
     await saveTemplate();
-    const logoUrl = LOGO_URL;
     let sent = 0, failed = 0;
     for (const guest of targets) {
       try {
         const fromName = resolveFromName(guest);
-        const html = buildEmailHtml(template.body, guest, event, template.attachments || [], logoUrl, baseUrl, template.buttonText);
+        const blockBody = getBodyHtml(guest);
+        const bodyForEmail = blockBody !== null
+          ? `<div>${blockBody}</div>`
+          : resolveMerge(template.body, guest, event, baseUrl, template.buttonText);
+        const html = buildEmailHtmlWrapper(bodyForEmail, guest, template.attachments || []);
         const subject = resolveMerge(template.subject, guest, event, baseUrl, template.buttonText);
         if (TEST_MODE) {
           console.log(`[TEST]\nFrom: ${fromName}\nTo: ${guest.email}\nSubject: ${subject}`);
@@ -243,9 +319,18 @@ export default function InvitationComposer() {
     setSendResult({ sent, failed }); setSending(false);
   };
 
-  if (!event) return <div className="loading">Loading...</div>;
+  if (!event || blocks === null) return <div className="loading">Loading...</div>;
   const targets = getTargetGuests();
-  const previewHtml = previewGuest ? buildEmailHtml(template.body, previewGuest, event, template.attachments || [], LOGO_URL, baseUrl, template.buttonText) : "";
+
+  // Build preview HTML
+  let previewHtml = "";
+  if (previewGuest) {
+    const blockBody = getBodyHtml(previewGuest);
+    const bodyForPreview = blockBody !== null
+      ? `<div>${blockBody}</div>`
+      : resolveMerge(template.body, previewGuest, event, baseUrl, template.buttonText);
+    previewHtml = buildEmailHtmlWrapper(bodyForPreview, previewGuest, template.attachments || []);
+  }
   const previewFromName = previewGuest ? resolveFromName(previewGuest) : template.fromName;
 
   return (
@@ -262,100 +347,136 @@ export default function InvitationComposer() {
       </div>
 
       {tab === "compose" && (
-        <div className="compose-layout">
-          <div>
-            <div className="card" style={{ marginBottom: "1rem" }}>
-              <div className="card-header"><h2>Sender & Subject</h2></div>
-              <div className="card-body">
-                <div className="form-group">
-                  <label>From Name</label>
-                  <input className="form-input" value={template.fromName} onChange={set("fromName")} placeholder="e.g. CSPC Events, Ben Pickert" disabled={template.fromStaffPoc} />
-                </div>
-                <label className="checkbox-label" style={{ marginBottom: "0.875rem" }}>
-                  <input type="checkbox" checked={template.fromStaffPoc || false} onChange={set("fromStaffPoc")} />
-                  <span>Use each guest's <strong>Staff POC</strong> as the sender name</span>
-                </label>
-                {template.fromStaffPoc && <div style={{ fontSize: "0.8125rem", color: "var(--green)", background: "var(--green-light)", padding: "0.5rem 0.75rem", borderRadius: "var(--radius)", marginBottom: "0.875rem" }}>✓ Each email will appear from the guest's assigned POC.</div>}
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label>Subject Line</label>
-                  <input className="form-input" value={template.subject} onChange={set("subject")} />
-                </div>
+        <div>
+          {/* Sender settings bar */}
+          <div className="card" style={{ marginBottom: "1rem" }}>
+            <div className="card-body" style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ flex: "2", minWidth: 200 }}>
+                <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", display: "block", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>From Name</label>
+                <input className="form-input" value={template.fromName} onChange={set("fromName")} placeholder="CSPC Events" disabled={template.fromStaffPoc} />
               </div>
-            </div>
-
-            <div className="card" style={{ marginBottom: "1rem" }}>
-              <div className="card-header"><h2>Body</h2></div>
-              <div className="card-body">
-                <div className="form-group">
-                  <label>Insert merge field at cursor</label>
-                  <div className="merge-field-list">
-                    {MERGE_FIELDS.map((m) => (
-                      <button key={m.token} type="button" className="btn btn-ghost btn-sm"
-                        style={{ fontSize: "0.7rem", padding: "0.1875rem 0.5rem", border: "1px solid var(--gray-200)", ...(m.highlight ? { background: "var(--navy-light)", color: "var(--navy)", borderColor: "var(--navy)" } : {}) }}
-                        onClick={() => insertAtCursor(m.token)}>{m.label}</button>
-                    ))}
-                  </div>
-                </div>
-                <textarea id="email-body-textarea" className="form-textarea" style={{ minHeight: 240, fontFamily: "monospace", fontSize: "0.875rem" }} value={template.body} onChange={set("body")} />
-                <div className="form-group" style={{ marginTop: "0.875rem", marginBottom: 0 }}>
-                  <label>RSVP Button Label</label>
-                  <input className="form-input" value={template.buttonText || "RSVP Now"} onChange={set("buttonText")} placeholder="RSVP Now" style={{ maxWidth: 240 }} />
-                </div>
+              <label className="checkbox-label" style={{ paddingBottom: "0.5rem", whiteSpace: "nowrap" }}>
+                <input type="checkbox" checked={template.fromStaffPoc || false} onChange={set("fromStaffPoc")} />
+                <span>Use Staff POC per guest</span>
+              </label>
+              <div style={{ flex: "3", minWidth: 240 }}>
+                <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", display: "block", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>Subject</label>
+                <input className="form-input" value={template.subject} onChange={set("subject")} />
               </div>
-            </div>
-
-            <div className="card" style={{ marginBottom: "1rem" }}>
-              <div className="card-header"><h2>Attachments</h2></div>
-              <div className="card-body">
-                <input type="file" id="attach-upload" style={{ display: "none" }} onChange={uploadAttachment} />
-                <button className="btn btn-secondary btn-sm" onClick={() => document.getElementById("attach-upload").click()} disabled={uploadProgress !== null}>
-                  {uploadProgress !== null ? `Uploading ${uploadProgress}%...` : "＋ Add Attachment"}
+              {/* Mode toggle */}
+              <div style={{ display: "flex", border: "1.5px solid var(--gray-200)", borderRadius: "var(--radius)", overflow: "hidden", flexShrink: 0 }}>
+                <button className="btn btn-sm" onClick={() => setEditorMode("designer")}
+                  style={{ borderRadius: 0, background: editorMode === "designer" ? "var(--navy)" : "var(--white)", color: editorMode === "designer" ? "var(--white)" : "var(--gray-600)", border: "none" }}>
+                  🎨 Designer
                 </button>
-                {uploadProgress !== null && (
-                  <div style={{ marginTop: "0.5rem" }}>
-                    <div className="progress-bar"><div className="progress-fill" style={{ width: `${uploadProgress}%` }} /></div>
-                  </div>
-                )}
-                {(template.attachments || []).length > 0 && (
-                  <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-                    {template.attachments.map((a) => (
-                      <div key={a.name} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}>
-                        <span>📎 {a.name}</span>
-                        <span style={{ color: "var(--gray-400)", fontSize: "0.75rem" }}>({Math.round(a.size / 1024)} KB)</span>
-                        <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)", padding: "0.125rem 0.375rem" }} onClick={() => removeAttachment(a.name)}>✕</button>
+                <button className="btn btn-sm" onClick={() => setEditorMode("simple")}
+                  style={{ borderRadius: 0, background: editorMode === "simple" ? "var(--navy)" : "var(--white)", color: editorMode === "simple" ? "var(--white)" : "var(--gray-600)", border: "none", borderLeft: "1px solid var(--gray-200)" }}>
+                  &lt;/&gt; Simple
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Designer mode */}
+          {editorMode === "designer" && (
+            <EmailDesigner
+              blocks={blocks}
+              onChange={setBlocks}
+              subject={template.subject}
+              onSubjectChange={(v) => setTemplate((t) => ({ ...t, subject: v }))}
+              buttonText={template.buttonText}
+              onButtonTextChange={(v) => setTemplate((t) => ({ ...t, buttonText: v }))}
+            />
+          )}
+
+          {/* Simple mode — original textarea + preview layout */}
+          {editorMode === "simple" && (
+            <div className="compose-layout">
+              <div>
+                <div className="card" style={{ marginBottom: "1rem" }}>
+                  <div className="card-header"><h2>Body</h2></div>
+                  <div className="card-body">
+                    <div className="form-group">
+                      <label>Insert merge field at cursor</label>
+                      <div className="merge-field-list">
+                        {MERGE_FIELDS.map((m) => (
+                          <button key={m.token} type="button" className="btn btn-ghost btn-sm"
+                            style={{ fontSize: "0.7rem", padding: "0.1875rem 0.5rem", border: "1px solid var(--gray-200)", ...(m.highlight ? { background: "var(--navy-light)", color: "var(--navy)", borderColor: "var(--navy)" } : {}) }}
+                            onClick={() => insertAtCursor(m.token)}>{m.label}</button>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+                    <textarea id="email-body-textarea" className="form-textarea" style={{ minHeight: 260, fontFamily: "monospace", fontSize: "0.875rem" }} value={template.body} onChange={set("body")} />
+                    <div className="form-group" style={{ marginTop: "0.875rem", marginBottom: 0 }}>
+                      <label>RSVP Button Label</label>
+                      <input className="form-input" value={template.buttonText || "RSVP Now"} onChange={set("buttonText")} style={{ maxWidth: 240 }} />
+                    </div>
                   </div>
-                )}
-                <div className="form-hint" style={{ marginTop: "0.5rem" }}>Max 10MB per file. If uploads fail, Firebase Storage CORS may need to be configured — see README.</div>
-              </div>
-            </div>
+                </div>
 
-            <div className="card">
-              <div className="card-header"><h2>Preview As</h2></div>
-              <div className="card-body">
-                <select className="form-select" style={{ marginBottom: "0.875rem" }} value={previewGuest?.id || ""} onChange={(e) => setPreviewGuest(guests.find((g) => g.id === e.target.value))}>
-                  {guests.map((g) => <option key={g.id} value={g.id}>{g.firstName} {g.lastName}{g.staffPoc ? ` — ${g.staffPoc}` : ""}</option>)}
-                </select>
-                <button className="btn btn-secondary" onClick={sendPreview} disabled={sendingPreview || !previewGuest}>
-                  {sendingPreview ? "Sending..." : `Send preview to ${user?.email || "me"}`}
-                </button>
-                {previewResult && <div style={{ marginTop: "0.625rem", fontSize: "0.8125rem", color: previewResult.ok ? "var(--green)" : "var(--red)" }}>{previewResult.ok ? `✓ Preview sent to ${previewResult.email}` : `Error: ${previewResult.error}`}</div>}
-              </div>
-            </div>
-          </div>
+                <div className="card" style={{ marginBottom: "1rem" }}>
+                  <div className="card-header"><h2>Attachments</h2></div>
+                  <div className="card-body">
+                    <input type="file" id="attach-upload" style={{ display: "none" }} onChange={uploadAttachment} />
+                    <button className="btn btn-secondary btn-sm" onClick={() => document.getElementById("attach-upload").click()} disabled={uploadProgress !== null}>
+                      {uploadProgress !== null ? `Uploading ${uploadProgress}%...` : "＋ Add Attachment"}
+                    </button>
+                    {uploadProgress !== null && <div style={{ marginTop: "0.5rem" }}><div className="progress-bar"><div className="progress-fill" style={{ width: `${uploadProgress}%` }} /></div></div>}
+                    {(template.attachments || []).length > 0 && (
+                      <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+                        {template.attachments.map((a) => (
+                          <div key={a.name} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}>
+                            <span>📎 {a.name}</span>
+                            <span style={{ color: "var(--gray-400)", fontSize: "0.75rem" }}>({Math.round(a.size / 1024)} KB)</span>
+                            <button className="btn btn-ghost btn-sm" style={{ color: "var(--red)", padding: "0.125rem 0.375rem" }} onClick={() => removeAttachment(a.name)}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-          <div>
-            <div className="card" style={{ position: "sticky", top: "72px" }}>
-              <div className="card-header">
-                <h2>Live Preview</h2>
-                {previewGuest && <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>From: <strong>{previewFromName}</strong></span>}
+                <div className="card">
+                  <div className="card-header"><h2>Preview As</h2></div>
+                  <div className="card-body">
+                    <select className="form-select" style={{ marginBottom: "0.875rem" }} value={previewGuest?.id || ""} onChange={(e) => setPreviewGuest(guests.find((g) => g.id === e.target.value))}>
+                      {guests.map((g) => <option key={g.id} value={g.id}>{g.firstName} {g.lastName}{g.staffPoc ? ` — ${g.staffPoc}` : ""}</option>)}
+                    </select>
+                    <button className="btn btn-secondary" onClick={sendPreview} disabled={sendingPreview || !previewGuest}>
+                      {sendingPreview ? "Sending..." : `Send preview to ${user?.email || "me"}`}
+                    </button>
+                    {previewResult && <div style={{ marginTop: "0.625rem", fontSize: "0.8125rem", color: previewResult.ok ? "var(--green)" : "var(--red)" }}>{previewResult.ok ? `✓ Preview sent to ${previewResult.email}` : `Error: ${previewResult.error}`}</div>}
+                  </div>
+                </div>
               </div>
-              <div style={{ borderRadius: "0 0 var(--radius-lg) var(--radius-lg)", overflow: "hidden" }}>
-                {previewGuest ? <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 560, border: "none" }} /> : <div className="empty-state" style={{ padding: "3rem" }}>Add guests to preview</div>}
+
+              <div>
+                <div className="card" style={{ position: "sticky", top: "72px" }}>
+                  <div className="card-header">
+                    <h2>Live Preview</h2>
+                    {previewGuest && <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>From: <strong>{previewFromName}</strong></span>}
+                  </div>
+                  <div style={{ borderRadius: "0 0 var(--radius-lg) var(--radius-lg)", overflow: "hidden" }}>
+                    {previewGuest ? <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 560, border: "none" }} /> : <div className="empty-state" style={{ padding: "3rem" }}>Add guests to preview</div>}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* Designer mode preview + send row */}
+          {editorMode === "designer" && (
+            <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+              <select className="form-select" style={{ width: "auto" }} value={previewGuest?.id || ""} onChange={(e) => setPreviewGuest(guests.find((g) => g.id === e.target.value))}>
+                {guests.map((g) => <option key={g.id} value={g.id}>{g.firstName} {g.lastName}</option>)}
+              </select>
+              <button className="btn btn-secondary" onClick={sendPreview} disabled={sendingPreview || !previewGuest}>
+                {sendingPreview ? "Sending..." : `Send preview to ${user?.email || "me"}`}
+              </button>
+              <button className="btn btn-ghost" onClick={saveTemplate}>Save Draft</button>
+              {previewResult && <span style={{ fontSize: "0.8125rem", color: previewResult.ok ? "var(--green)" : "var(--red)" }}>{previewResult.ok ? `✓ Preview sent to ${previewResult.email}` : `Error: ${previewResult.error}`}</span>}
+            </div>
+          )}
         </div>
       )}
 
