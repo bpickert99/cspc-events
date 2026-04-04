@@ -8,7 +8,7 @@ import { useAuth } from "../contexts/AuthContext";
 // ─── Open tracking pixel URL ──────────────────────────────────────────────────
 // Once Cloudflare Worker is set up, replace this with your worker URL:
 // e.g. https://cspc-tracker.YOUR_SUBDOMAIN.workers.dev/pixel/{{guestId}}
-const TRACKING_PIXEL_URL = null; // Set to your Cloudflare Worker URL when ready
+const TRACKING_PIXEL_URL = "cspc-tracker.bpickert99.workers.dev/pixel/{{guestId}}"
 
 const MERGE_FIELDS = [
   { token: "{{firstName}}", label: "First Name" },
