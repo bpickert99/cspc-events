@@ -20,13 +20,12 @@ const firebaseConfig = {
 // TEST MODE: When true, emails are logged to console instead of sent.
 // Set to false once Microsoft Graph API is configured.
 // ─────────────────────────────────────────────────────────────────────────────
-export const TEST_MODE = true;
+export const TEST_MODE = false;
 
-// Microsoft Graph API config (for real email sending — fill in after IT setup)
-export const GRAPH_CONFIG = {
-  clientId: "REPLACE_WITH_AZURE_CLIENT_ID",
-  tenantId: "REPLACE_WITH_AZURE_TENANT_ID",
-  senderEmail: "events@thepresidency.org",
+export const EMAILJS_CONFIG = {
+  serviceId: "service_bxq3x6r",
+  templateId: "service_bxq3x6r",
+  publicKey: "YOUR_PUBLIC_KEY",
 };
 
 const app = initializeApp(firebaseConfig);

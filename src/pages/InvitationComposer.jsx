@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { doc, getDoc, getDocs, query, collection, where, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { db, storage, TEST_MODE } from "../firebase";
+import { db, storage, TEST_MODE, EMAILJS_CONFIG } from "../firebase";
 import { useAuth } from "../contexts/AuthContext";
+import emailjs from "@emailjs/browser";
 
 // ─── Open tracking pixel URL ──────────────────────────────────────────────────
 // Once Cloudflare Worker is set up, replace this with your worker URL:
 // e.g. https://cspc-tracker.YOUR_SUBDOMAIN.workers.dev/pixel/{{guestId}}
-const TRACKING_PIXEL_URL = "cspc-tracker.bpickert99.workers.dev/pixel/{{guestId}}"
+const TRACKING_PIXEL_URL = null; // Set to your Cloudflare Worker URL when ready
 
 const MERGE_FIELDS = [
   { token: "{{firstName}}", label: "First Name" },
@@ -185,10 +186,18 @@ export default function InvitationComposer() {
     const subject = `[PREVIEW] ${resolveMerge(template.subject, previewGuest, event, baseUrl, template.buttonText)}`;
     const fromName = resolveFromName(previewGuest);
     if (TEST_MODE) {
-      console.log(`[PREVIEW]\nFrom: ${fromName} <events@thepresidency.org>\nTo: ${user.email}\nSubject: ${subject}`);
+      console.log(`[PREVIEW]\nFrom: ${fromName}\nTo: ${user.email}\nSubject: ${subject}`);
       await new Promise((r) => setTimeout(r, 600));
       setPreviewResult({ ok: true, email: user.email });
-    } else { setPreviewResult({ ok: false, error: "Graph API not yet configured." }); }
+    } else {
+      await emailjs.send(
+        EMAILJS_CONFIG.serviceId,
+        EMAILJS_CONFIG.templateId,
+        { to_email: user.email, subject, message: html, from_name: fromName },
+        EMAILJS_CONFIG.publicKey
+      );
+      setPreviewResult({ ok: true, email: user.email });
+    }
     setSendingPreview(false);
   };
 
@@ -206,9 +215,16 @@ export default function InvitationComposer() {
         const html = buildEmailHtml(template.body, guest, event, template.attachments || [], logoUrl, baseUrl, template.buttonText);
         const subject = resolveMerge(template.subject, guest, event, baseUrl, template.buttonText);
         if (TEST_MODE) {
-          console.log(`[TEST]\nFrom: ${fromName} <events@thepresidency.org>\nTo: ${guest.email}\nSubject: ${subject}`);
+          console.log(`[TEST]\nFrom: ${fromName}\nTo: ${guest.email}\nSubject: ${subject}`);
           await new Promise((r) => setTimeout(r, 80));
-        } else { throw new Error("Graph API not yet configured."); }
+        } else {
+          await emailjs.send(
+            EMAILJS_CONFIG.serviceId,
+            EMAILJS_CONFIG.templateId,
+            { to_email: guest.email, subject, message: html, from_name: fromName },
+            EMAILJS_CONFIG.publicKey
+          );
+        }
         await updateDoc(doc(db, "guests", guest.id), { emailSent: true, emailSentAt: serverTimestamp() });
         sent++;
       } catch (err) { console.error("Failed:", guest.email, err); failed++; }
