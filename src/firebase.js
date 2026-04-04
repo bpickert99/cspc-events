@@ -23,7 +23,7 @@ const firebaseConfig = {
 export const TEST_MODE = false;
 
 export const EMAILJS_CONFIG = {
-  serviceId: "service_bxq3x6r",
+  serviceId: "service_nntjsyg",
   templateId: "template_h0hio4p",
   publicKey: "VvkOnZERqW9UZQEgk",
 };
