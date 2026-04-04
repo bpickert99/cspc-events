@@ -3,8 +3,8 @@ import { useParams } from "react-router-dom";
 import { doc, getDoc, collection, query, where, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 
-const STATUS_BADGE = { pending: "badge-pending", yes: "badge-yes", no: "badge-no", partial: "badge-partial" };
-const STATUS_LABEL = { pending: "Pending", yes: "Attending", no: "Declined", partial: "Partial" };
+const STATUS_BADGE = { pending: "badge-pending", yes: "badge-yes", no: "badge-no" };
+const STATUS_LABEL = { pending: "Pending", yes: "Attending", no: "Declined" };
 
 export default function TrackingDashboard() {
   const { id } = useParams();
@@ -33,7 +33,9 @@ export default function TrackingDashboard() {
   };
 
   const overrideRsvp = async (guestId, status) => {
-    await updateDoc(doc(db, "guests", guestId), { rsvpStatus: status, rsvpOverridden: true, updatedAt: serverTimestamp() });
+    const updates = { rsvpStatus: status, rsvpOverridden: true, updatedAt: serverTimestamp() };
+    if (status === "yes") updates.rsvpSubmittedAt = serverTimestamp();
+    await updateDoc(doc(db, "guests", guestId), updates);
   };
 
   if (!event) return <div className="loading">Loading...</div>;
@@ -42,10 +44,13 @@ export default function TrackingDashboard() {
   const sent = guests.filter((g) => g.emailSent).length;
   const opened = guests.filter((g) => g.emailOpened).length;
   const bounced = guests.filter((g) => g.emailBounced).length;
-  const attending = guests.filter((g) => g.rsvpStatus === "yes" || g.rsvpStatus === "partial").length;
+  const attending = guests.filter((g) => g.rsvpStatus === "yes").length;
   const declined = guests.filter((g) => g.rsvpStatus === "no").length;
   const pending = guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length;
   const responded = attending + declined;
+  // Response rate: responded / sent, capped at 100%, never includes plus ones
+  const responseRate = sent > 0 ? Math.min(100, Math.round((responded / sent) * 100)) : 0;
+
   const eventTags = event.tags || [];
 
   const filtered = guests.filter((g) => {
@@ -53,7 +58,7 @@ export default function TrackingDashboard() {
     const matchSearch = !search || name.includes(search.toLowerCase());
     const matchFilter =
       filter === "all" ||
-      (filter === "attending" && (g.rsvpStatus === "yes" || g.rsvpStatus === "partial")) ||
+      (filter === "attending" && g.rsvpStatus === "yes") ||
       (filter === "declined" && g.rsvpStatus === "no") ||
       (filter === "pending" && (!g.rsvpStatus || g.rsvpStatus === "pending")) ||
       (filter === "opened" && g.emailOpened) ||
@@ -66,20 +71,14 @@ export default function TrackingDashboard() {
 
   const partBreakdown = (event.parts || []).map((part) => {
     const invited = guests.filter((g) => (g.invitedParts || []).includes(part.id));
-    const att = guests.filter((g) =>
-      (g.rsvpStatus === "yes" || g.rsvpStatus === "partial") &&
-      (g.rsvpParts || g.invitedParts || []).includes(part.id)
-    );
+    const att = guests.filter((g) => g.rsvpStatus === "yes" && (g.rsvpParts?.includes(part.id) ?? (g.invitedParts || []).includes(part.id)));
     return { part, invited: invited.length, attending: att.length };
   });
 
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h1>Tracking</h1>
-          <p>{event.name} · real-time RSVP monitoring</p>
-        </div>
+        <div><h1>Tracking</h1><p>{event.name} · real-time RSVP monitoring</p></div>
       </div>
 
       <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
@@ -91,10 +90,11 @@ export default function TrackingDashboard() {
           { label: "Attending", value: attending, color: "var(--green)" },
           { label: "Declined", value: declined, color: "var(--red)" },
           { label: "Pending", value: pending, color: "var(--amber)" },
+          { label: "Response Rate", value: `${responseRate}%`, color: "var(--navy)" },
           { label: "Bounced", value: bounced, color: "var(--red)" },
         ].map((s) => (
           <div key={s.label} className="stat-card">
-            <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+            <div className="stat-value" style={{ color: s.color, fontSize: typeof s.value === "string" ? "1.5rem" : "2rem" }}>{s.value}</div>
             <div className="stat-label">{s.label}</div>
           </div>
         ))}
@@ -104,12 +104,10 @@ export default function TrackingDashboard() {
         <div className="card" style={{ marginBottom: "1.25rem" }}>
           <div className="card-body">
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "var(--gray-600)", marginBottom: "0.375rem" }}>
-              <span>Response rate</span>
-              <span>{Math.round((responded / sent) * 100)}% ({responded}/{sent})</span>
+              <span>Response rate ({responded} of {sent} emailed)</span>
+              <span>{responseRate}%</span>
             </div>
-            <div className="progress-bar">
-              <div className="progress-fill green" style={{ width: `${(responded / sent) * 100}%` }} />
-            </div>
+            <div className="progress-bar"><div className="progress-fill green" style={{ width: `${responseRate}%` }} /></div>
             {(event.parts || []).length > 1 && (
               <div style={{ marginTop: "1rem", display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
                 {partBreakdown.map(({ part, invited, attending }) => (
@@ -117,7 +115,7 @@ export default function TrackingDashboard() {
                     <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", marginBottom: "0.25rem" }}>{part.name}</div>
                     <div style={{ fontSize: "0.75rem", color: "var(--gray-400)" }}>{attending} attending / {invited} invited</div>
                     <div className="progress-bar" style={{ width: 120, marginTop: "0.25rem" }}>
-                      <div className="progress-fill" style={{ width: invited > 0 ? `${(attending / invited) * 100}%` : "0%" }} />
+                      <div className="progress-fill" style={{ width: invited > 0 ? `${Math.min(100, (attending / invited) * 100)}%` : "0%" }} />
                     </div>
                   </div>
                 ))}
@@ -163,9 +161,9 @@ export default function TrackingDashboard() {
                 <th>Email Status</th>
                 <th>RSVP</th>
                 {(event.parts || []).length > 1 && <th>Attending Parts</th>}
-                <th title="Answers submitted through the RSVP form (dietary restrictions, accessibility needs, etc.)">RSVP Form Answers ⓘ</th>
+                <th title="Answers submitted through the RSVP form">RSVP Form Answers</th>
                 <th>Notes</th>
-                <th>Override</th>
+                <th>Edit RSVP</th>
               </tr>
             </thead>
             <tbody>
@@ -183,20 +181,14 @@ export default function TrackingDashboard() {
                   {(event.parts || []).length > 1 && (
                     <td>
                       <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                        {(g.invitedParts || []).map((pid) => {
-                          const p = (event.parts || []).find((x) => x.id === pid);
-                          return p ? <span key={pid} className="tag" style={{ fontSize: "0.7rem" }}>{p.name}</span> : null;
-                        })}
+                        {(g.invitedParts || []).map((pid) => { const p = (event.parts || []).find((x) => x.id === pid); return p ? <span key={pid} className="tag" style={{ fontSize: "0.7rem" }}>{p.name}</span> : null; })}
                       </div>
                     </td>
                   )}
                   {eventTags.length > 0 && (
                     <td>
                       <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                        {(g.tags || []).map((tid) => {
-                          const tag = eventTags.find((t) => t.id === tid);
-                          return tag ? <span key={tid} style={{ padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>{tag.name}</span> : null;
-                        })}
+                        {(g.tags || []).map((tid) => { const tag = eventTags.find((t) => t.id === tid); return tag ? <span key={tid} style={{ padding: "0.125rem 0.5rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.7rem", fontWeight: 700, color: tag.color }}>{tag.name}</span> : null; })}
                       </div>
                     </td>
                   )}
@@ -205,17 +197,11 @@ export default function TrackingDashboard() {
                       : g.emailBounced ? <span className="badge badge-bounced">Bounced</span>
                       : g.emailOpened ? <span className="badge badge-opened">Opened</span>
                       : <span className="badge badge-sent">Sent</span>}
-                    {g.rsvpOverridden && <div style={{ fontSize: "0.65rem", color: "var(--amber)", marginTop: "0.125rem" }}>Manual override</div>}
+                    {g.rsvpOverridden && <div style={{ fontSize: "0.65rem", color: "var(--amber)", marginTop: "0.125rem" }}>Staff edited</div>}
                   </td>
                   <td>
-                    <span className={`badge ${STATUS_BADGE[g.rsvpStatus] || "badge-pending"}`}>
-                      {STATUS_LABEL[g.rsvpStatus] || "Pending"}
-                    </span>
-                    {g.rsvpSubmittedAt && (
-                      <div style={{ fontSize: "0.65rem", color: "var(--gray-400)", marginTop: "0.125rem" }}>
-                        {(g.rsvpSubmittedAt.toDate ? g.rsvpSubmittedAt.toDate() : new Date(g.rsvpSubmittedAt)).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      </div>
-                    )}
+                    <span className={`badge ${STATUS_BADGE[g.rsvpStatus] || "badge-pending"}`}>{STATUS_LABEL[g.rsvpStatus] || "Pending"}</span>
+                    {g.rsvpSubmittedAt && <div style={{ fontSize: "0.65rem", color: "var(--gray-400)", marginTop: "0.125rem" }}>{(g.rsvpSubmittedAt.toDate ? g.rsvpSubmittedAt.toDate() : new Date(g.rsvpSubmittedAt)).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>}
                   </td>
                   {(event.parts || []).length > 1 && (
                     <td style={{ fontSize: "0.8125rem" }}>
@@ -245,11 +231,8 @@ export default function TrackingDashboard() {
                       </div>
                     ) : (
                       <div style={{ display: "flex", gap: "0.375rem", alignItems: "flex-start" }}>
-                        <span style={{ fontSize: "0.8125rem", color: g.notes ? "var(--gray-800)" : "var(--gray-400)", flex: 1 }}>
-                          {g.notes || "—"}
-                        </span>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: "0.125rem 0.375rem", flexShrink: 0 }}
-                          onClick={() => { setEditingNote(g.id); setNoteText(g.notes || ""); }}>✏️</button>
+                        <span style={{ fontSize: "0.8125rem", color: g.notes ? "var(--gray-800)" : "var(--gray-400)", flex: 1 }}>{g.notes || "—"}</span>
+                        <button className="btn btn-ghost btn-sm" style={{ padding: "0.125rem 0.375rem", flexShrink: 0 }} onClick={() => { setEditingNote(g.id); setNoteText(g.notes || ""); }}>✏️</button>
                       </div>
                     )}
                   </td>
@@ -259,7 +242,6 @@ export default function TrackingDashboard() {
                       onChange={(e) => overrideRsvp(g.id, e.target.value)}>
                       <option value="pending">Pending</option>
                       <option value="yes">Attending</option>
-                      <option value="partial">Partial</option>
                       <option value="no">Declined</option>
                     </select>
                   </td>

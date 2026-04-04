@@ -1,22 +1,31 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { auth } from "../firebase";
 
 export default function Login() {
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState("signin"); // "signin" | "signup"
+  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "reset"
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
   const submit = async (e) => {
     e.preventDefault();
-    setError("");
+    setError(""); setSuccess("");
     setLoading(true);
     try {
+      if (mode === "reset") {
+        await sendPasswordResetEmail(auth, form.email);
+        setSuccess("Password reset email sent. Check your inbox.");
+        setLoading(false);
+        return;
+      }
       if (mode === "signup") {
         await signUp(form.email, form.password, form.name);
       } else {
@@ -29,6 +38,7 @@ export default function Login() {
         "auth/email-already-in-use": "An account with this email already exists.",
         "auth/weak-password": "Password must be at least 6 characters.",
         "auth/invalid-email": "Please enter a valid email address.",
+        "auth/user-not-found": "No account found with this email.",
       };
       setError(msgs[err.code] || "Something went wrong. Please try again.");
     } finally {
@@ -36,16 +46,23 @@ export default function Login() {
     }
   };
 
+  const switchMode = (m) => { setMode(m); setError(""); setSuccess(""); };
+
   return (
     <div className="login-page">
       <div className="login-card">
         <div className="login-logo">
-          <img src="./cspc-logo.png" alt="CSPC" style={{ height: 52, display: "block", margin: "0 auto" }} />
+          <img src="./cspc-logo.png" alt="CSPC" />
         </div>
         <h1>CSPC Events</h1>
-        <p>{mode === "signin" ? "Sign in to manage events" : "Create your staff account"}</p>
+        <p>
+          {mode === "signin" && "Sign in to manage events"}
+          {mode === "signup" && "Create your staff account"}
+          {mode === "reset" && "Reset your password"}
+        </p>
 
         {error && <div className="error-msg">{error}</div>}
+        {success && <div className="success-msg">{success}</div>}
 
         <form onSubmit={submit} style={{ textAlign: "left" }}>
           {mode === "signup" && (
@@ -58,25 +75,42 @@ export default function Login() {
             <label>Email Address <span className="required">*</span></label>
             <input className="form-input" type="email" required value={form.email} onChange={set("email")} placeholder="you@thepresidency.org" />
           </div>
-          <div className="form-group">
-            <label>Password <span className="required">*</span></label>
-            <input className="form-input" type="password" required value={form.password} onChange={set("password")} placeholder={mode === "signup" ? "At least 6 characters" : "Your password"} />
-          </div>
-          <button className="btn btn-primary btn-lg" type="submit" disabled={loading} style={{ width: "100%", marginTop: "0.5rem" }}>
-            {loading ? "Please wait..." : mode === "signin" ? "Sign In" : "Create Account"}
+          {mode !== "reset" && (
+            <div className="form-group">
+              <label>Password <span className="required">*</span></label>
+              <input className="form-input" type="password" required value={form.password} onChange={set("password")} placeholder={mode === "signup" ? "At least 6 characters" : "Your password"} />
+            </div>
+          )}
+
+          {mode === "signin" && (
+            <div style={{ textAlign: "right", marginBottom: "0.75rem" }}>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: "0.8125rem", color: "var(--gray-500)" }} onClick={() => switchMode("reset")}>
+                Forgot password?
+              </button>
+            </div>
+          )}
+
+          <button className="btn btn-primary btn-lg" type="submit" disabled={loading} style={{ width: "100%" }}>
+            {loading ? "Please wait..." : mode === "signin" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Reset Email"}
           </button>
         </form>
 
-        <div style={{ marginTop: "1.25rem", fontSize: "0.875rem", color: "var(--gray-600)" }}>
-          {mode === "signin" ? (
-            <>No account yet?{" "}<button className="btn btn-ghost btn-sm" onClick={() => setMode("signup")}>Create one</button></>
-          ) : (
-            <>Already have an account?{" "}<button className="btn btn-ghost btn-sm" onClick={() => setMode("signin")}>Sign in</button></>
+        <div style={{ marginTop: "1.25rem", fontSize: "0.875rem", color: "var(--gray-600)", display: "flex", justifyContent: "center", gap: "0.25rem", flexWrap: "wrap" }}>
+          {mode === "signin" && (
+            <>
+              <span>No account?</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => switchMode("signup")}>Create one</button>
+            </>
           )}
-        </div>
-
-        <div style={{ marginTop: "1.5rem", padding: "0.75rem", background: "var(--gray-50)", borderRadius: "var(--radius)", fontSize: "0.8rem", color: "var(--gray-400)", textAlign: "left" }}>
-          <strong>Test mode:</strong> Using email/password authentication. Microsoft sign-in will be added once Azure AD is configured.
+          {mode === "signup" && (
+            <>
+              <span>Already have an account?</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => switchMode("signin")}>Sign in</button>
+            </>
+          )}
+          {mode === "reset" && (
+            <button className="btn btn-ghost btn-sm" onClick={() => switchMode("signin")}>← Back to sign in</button>
+          )}
         </div>
       </div>
     </div>
