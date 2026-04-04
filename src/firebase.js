@@ -25,7 +25,7 @@ export const TEST_MODE = false;
 export const EMAILJS_CONFIG = {
   serviceId: "service_bxq3x6r",
   templateId: "service_bxq3x6r",
-  publicKey: "YOUR_PUBLIC_KEY",
+  publicKey: "gbm7J73MV8nBXHpBZZReC",
 };
 
 const app = initializeApp(firebaseConfig);
