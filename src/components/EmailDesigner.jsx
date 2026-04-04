@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
+import { DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, closestCenter } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { v4 as uuid } from "uuid";
@@ -313,54 +313,36 @@ function BlockSettings({ block, onChange }) {
   }
 }
 
-// ─── Palette item (draggable from palette to canvas) ───────────────────────────
-function PaletteItem({ type, icon, label }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `palette-${type}` });
+// ─── Palette item — click to add ──────────────────────────────────────────────
+function PaletteItem({ type, icon, label, onAdd }) {
   return (
-    <div ref={setNodeRef} {...attributes} {...listeners}
-      style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.75rem", borderRadius: 8, border: "1.5px solid var(--gray-200)", background: isDragging ? "var(--navy-light)" : "white", cursor: "grab", userSelect: "none", marginBottom: "0.375rem", transition: "all 0.15s", fontSize: "0.8125rem", fontWeight: 600, color: "var(--gray-700)", boxShadow: isDragging ? "var(--shadow-md)" : "var(--shadow-xs)" }}
-      onMouseEnter={(e) => { if (!isDragging) { e.currentTarget.style.borderColor = "var(--navy)"; e.currentTarget.style.background = "var(--navy-xlight)"; } }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--gray-200)"; e.currentTarget.style.background = "white"; }}>
-      <span style={{ fontSize: "1rem", width: 20, textAlign: "center" }}>{icon}</span>
+    <button
+      onClick={() => onAdd(type)}
+      style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.75rem", borderRadius: 8, border: "1.5px solid var(--gray-200)", background: "white", cursor: "pointer", userSelect: "none", marginBottom: "0.375rem", transition: "all 0.15s", fontSize: "0.8125rem", fontWeight: 600, color: "var(--gray-700)", width: "100%", textAlign: "left", boxShadow: "var(--shadow-xs)" }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--navy)"; e.currentTarget.style.background = "var(--navy-xlight)"; e.currentTarget.style.color = "var(--navy)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--gray-200)"; e.currentTarget.style.background = "white"; e.currentTarget.style.color = "var(--gray-700)"; }}>
+      <span style={{ fontSize: "1rem", width: 20, textAlign: "center", flexShrink: 0 }}>{icon}</span>
       {label}
-    </div>
-  );
-}
-
-// ─── Canvas drop zone ──────────────────────────────────────────────────────────
-function CanvasDropZone({ children, isEmpty }) {
-  const { isOver, setNodeRef } = useDroppable({ id: "canvas" });
-  return (
-    <div ref={setNodeRef} style={{ minHeight: 120, background: isOver ? "var(--navy-light)" : isEmpty ? "var(--gray-50)" : "transparent", border: isOver ? "2px dashed var(--navy)" : isEmpty ? "2px dashed var(--gray-200)" : "none", borderRadius: 8, transition: "all 0.15s", padding: isEmpty ? "2rem" : 0 }}>
-      {isEmpty
-        ? <div style={{ textAlign: "center", color: "var(--gray-400)", fontSize: "0.875rem" }}>
-            <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>🎨</div>
-            Drag blocks from the left panel to build your email
-          </div>
-        : children}
-    </div>
+    </button>
   );
 }
 
 // ─── Main EmailDesigner component ──────────────────────────────────────────────
 export default function EmailDesigner({ blocks, onChange, subject, onSubjectChange, buttonText, onButtonTextChange }) {
   const [selectedId, setSelectedId] = useState(null);
-  const [activeDragId, setActiveDragId] = useState(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const selectedBlock = blocks.find((b) => b.id === selectedId);
 
-  const addBlock = useCallback((type, insertAfter = null) => {
+  const addBlock = useCallback((type) => {
     const newBlock = createBlock(type);
-    onChange((prev) => {
-      if (insertAfter === null) return [...prev, newBlock];
-      const idx = prev.findIndex((b) => b.id === insertAfter);
-      const next = [...prev];
-      next.splice(idx + 1, 0, newBlock);
-      return next;
-    });
+    onChange((prev) => [...prev, newBlock]);
     setSelectedId(newBlock.id);
+    // Scroll canvas to bottom so user sees the new block
+    setTimeout(() => {
+      document.getElementById("designer-canvas")?.scrollTo({ top: 99999, behavior: "smooth" });
+    }, 50);
   }, [onChange]);
 
   const updateBlock = useCallback((updated) => {
@@ -385,35 +367,15 @@ export default function EmailDesigner({ blocks, onChange, subject, onSubjectChan
     setSelectedId(copy.id);
   }, [blocks, onChange]);
 
-  const onDragStart = ({ active }) => setActiveDragId(active.id);
-
   const onDragEnd = ({ active, over }) => {
-    setActiveDragId(null);
-    if (!over) return;
-
-    const isPalette = String(active.id).startsWith("palette-");
-
-    if (isPalette) {
-      // Adding a new block from palette
-      const type = String(active.id).replace("palette-", "");
-      if (over.id === "canvas" || blocks.some((b) => b.id === over.id)) {
-        const insertAfter = over.id === "canvas" ? null : over.id;
-        addBlock(type, insertAfter);
-      }
-    } else {
-      // Reordering existing blocks
-      if (active.id !== over.id) {
-        onChange((prev) => {
-          const oldIndex = prev.findIndex((b) => b.id === active.id);
-          const newIndex = prev.findIndex((b) => b.id === over.id);
-          return arrayMove(prev, oldIndex, newIndex);
-        });
-      }
-    }
+    if (!over || active.id === over.id) return;
+    onChange((prev) => {
+      const oldIndex = prev.findIndex((b) => b.id === active.id);
+      const newIndex = prev.findIndex((b) => b.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
   };
-
-  const activePaletteType = activeDragId?.startsWith?.("palette-") ? activeDragId.replace("palette-", "") : null;
-  const activePaletteDef = activePaletteType ? BLOCK_PALETTE.find((p) => p.type === activePaletteType) : null;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 240px", gap: "1rem", minHeight: 500 }}>
@@ -421,24 +383,32 @@ export default function EmailDesigner({ blocks, onChange, subject, onSubjectChan
       {/* ─── Left: palette ─── */}
       <div style={{ background: "var(--white)", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
         <div style={{ padding: "0.75rem 0.875rem", background: "var(--gray-50)", borderBottom: "1px solid var(--gray-100)", fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          Blocks
+          Add Block
         </div>
         <div style={{ padding: "0.625rem" }}>
-          {BLOCK_PALETTE.map((p) => <PaletteItem key={p.type} {...p} />)}
+          <div style={{ fontSize: "0.7rem", color: "var(--gray-400)", marginBottom: "0.5rem", paddingLeft: "0.25rem" }}>Click to add ↓</div>
+          {BLOCK_PALETTE.map((p) => <PaletteItem key={p.type} {...p} onAdd={addBlock} />)}
         </div>
       </div>
 
       {/* ─── Middle: canvas ─── */}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-        <div style={{ background: "var(--white)", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-lg)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          {/* Email chrome */}
-          <div style={{ background: "#0F1A45", padding: "16px 20px", textAlign: "center" }}>
-            <img src="https://bpickert99.github.io/cspc-events/cspc-logo.png" alt="CSPC" style={{ height: 32, filter: "brightness(0) invert(1)", display: "inline-block" }} />
-          </div>
+      <div style={{ background: "var(--white)", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-lg)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {/* Email chrome - header */}
+        <div style={{ background: "#0F1A45", padding: "16px 20px", textAlign: "center", flexShrink: 0 }}>
+          <img src="https://bpickert99.github.io/cspc-events/cspc-logo.png" alt="CSPC" style={{ height: 32, filter: "brightness(0) invert(1)", display: "inline-block" }} />
+        </div>
 
-          <div style={{ padding: "1rem 1.25rem", flex: 1 }}>
-            <SortableContext items={blocks.map((b) => b.id)} strategy={verticalListSortingStrategy}>
-              <CanvasDropZone isEmpty={blocks.length === 0}>
+        {/* Scrollable canvas area */}
+        <div id="designer-canvas" style={{ flex: 1, overflowY: "auto", padding: "1rem 1.25rem", minHeight: 200 }}>
+          {blocks.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--gray-400)", fontSize: "0.875rem", border: "2px dashed var(--gray-200)", borderRadius: 8 }}>
+              <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>🎨</div>
+              <div>Click a block type on the left to start building</div>
+              <div style={{ fontSize: "0.8rem", marginTop: "0.5rem", color: "var(--gray-300)" }}>Then drag the ⠿ handle to reorder</div>
+            </div>
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+              <SortableContext items={blocks.map((b) => b.id)} strategy={verticalListSortingStrategy}>
                 {blocks.map((block) => (
                   <SortableBlock
                     key={block.id}
@@ -448,25 +418,17 @@ export default function EmailDesigner({ blocks, onChange, subject, onSubjectChan
                     onDelete={deleteBlock}
                   />
                 ))}
-              </CanvasDropZone>
-            </SortableContext>
-          </div>
-
-          {/* Footer chrome */}
-          <div style={{ background: "#F6F8FC", borderTop: "1px solid #E4E8F0", padding: "10px 20px", textAlign: "center", fontSize: 11, color: "#94A0B8" }}>
-            Center for the Study of the Presidency and Congress · Washington, D.C.<br />
-            601 13th Street NW, Suite 940N, Washington, DC 20005
-          </div>
+              </SortableContext>
+            </DndContext>
+          )}
         </div>
 
-        <DragOverlay>
-          {activePaletteDef && (
-            <div style={{ padding: "0.5rem 0.75rem", borderRadius: 8, border: "1.5px solid var(--navy)", background: "var(--navy-light)", fontSize: "0.8125rem", fontWeight: 600, color: "var(--navy)", boxShadow: "var(--shadow-md)", cursor: "grabbing" }}>
-              {activePaletteDef.icon} {activePaletteDef.label}
-            </div>
-          )}
-        </DragOverlay>
-      </DndContext>
+        {/* Email chrome - footer */}
+        <div style={{ background: "#F6F8FC", borderTop: "1px solid #E4E8F0", padding: "10px 20px", textAlign: "center", fontSize: 11, color: "#94A0B8", flexShrink: 0 }}>
+          Center for the Study of the Presidency and Congress · Washington, D.C.<br />
+          601 13th Street NW, Suite 940N, Washington, DC 20005
+        </div>
+      </div>
 
       {/* ─── Right: settings ─── */}
       <div style={{ background: "var(--white)", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-lg)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
