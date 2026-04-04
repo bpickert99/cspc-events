@@ -24,7 +24,7 @@ export const TEST_MODE = false;
 
 export const EMAILJS_CONFIG = {
   serviceId: "service_bxq3x6r",
-  templateId: "service_bxq3x6r",
+  templateId: "template_h0hio4p",
   publicKey: "gbm7J73MV8nBXHpBZZReC",
 };
 
