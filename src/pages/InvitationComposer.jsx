@@ -208,7 +208,7 @@ export default function InvitationComposer() {
           .replace(/{{eventLocation}}/g, event?.location || "")
           .replace(/{{rsvpLink}}/g, `${baseUrl}#/rsvp/${guest.rsvpToken}`);
       };
-      return `<div>${blocksToHtml(blocks, resolver)}</div>`;
+      return `<div>${blocksToHtml(blocks, resolver, event)}</div>`;
     }
     return resolveMerge(template.body, guest, event, baseUrl, template.buttonText);
   };
@@ -398,7 +398,7 @@ export default function InvitationComposer() {
           {/* Designer mode */}
           {editorMode === "designer" && (
             <>
-              <EmailDesigner blocks={blocks} onChange={setBlocks} subject={template.subject} onSubjectChange={(v) => setTemplate((t) => ({ ...t, subject: v }))} buttonText={template.buttonText} onButtonTextChange={(v) => setTemplate((t) => ({ ...t, buttonText: v }))} />
+              <EmailDesigner blocks={blocks} onChange={setBlocks} subject={template.subject} onSubjectChange={(v) => setTemplate((t) => ({ ...t, subject: v }))} buttonText={template.buttonText} onButtonTextChange={(v) => setTemplate((t) => ({ ...t, buttonText: v }))} event={event} />
               <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
                 <select className="form-select" style={{ width: "auto" }} value={previewGuest?.id || ""} onChange={(e) => setPreviewGuest(guests.find((g) => g.id === e.target.value))}>
                   {guests.map((g) => <option key={g.id} value={g.id}>{g.firstName} {g.lastName}</option>)}

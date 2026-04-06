@@ -597,6 +597,7 @@ input, textarea, select { font-family: inherit; font-size: 0.9375rem; }
 }
 .block-drag-handle:hover { color: var(--gray-500); }
 .block-preview { pointer-events: none; }
+.designer-block.selected .block-preview { pointer-events: auto; }
 .block-delete {
   position: absolute;
   right: 6px;
