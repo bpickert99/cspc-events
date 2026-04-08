@@ -42,10 +42,9 @@ export default function Layout() {
             {eventId && !isNewEvent && (
               <>
                 <div className="sidebar-section" style={{ marginTop: "1rem" }}>This Event</div>
-                <NavLink to={`/events/${eventId}`} end>📋 Overview</NavLink>
+                <NavLink to={`/events/${eventId}`} end>📊 Overview & Tracking</NavLink>
                 <NavLink to={`/events/${eventId}/guests`}>👥 Guests</NavLink>
                 <NavLink to={`/events/${eventId}/invitations`}>✉️ Invitations</NavLink>
-                <NavLink to={`/events/${eventId}/tracking`}>📊 Tracking</NavLink>
                 <NavLink to={`/events/${eventId}/seating`}>🪑 Seating</NavLink>
               </>
             )}

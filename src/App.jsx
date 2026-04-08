@@ -7,7 +7,6 @@ import EventCreate from "./pages/EventCreate";
 import EventDetail from "./pages/EventDetail";
 import GuestManager from "./pages/GuestManager";
 import InvitationComposer from "./pages/InvitationComposer";
-import TrackingDashboard from "./pages/TrackingDashboard";
 import SeatingManager from "./pages/SeatingManager";
 import RSVPPage from "./pages/RSVPPage";
 
@@ -41,7 +40,7 @@ export default function App() {
         <Route path="events/:id/edit" element={<EventCreate />} />
         <Route path="events/:id/guests" element={<GuestManager />} />
         <Route path="events/:id/invitations" element={<InvitationComposer />} />
-        <Route path="events/:id/tracking" element={<TrackingDashboard />} />
+        <Route path="events/:id/tracking" element={<Navigate to="../" relative="path" replace />} />
         <Route path="events/:id/seating" element={<SeatingManager />} />
       </Route>
 

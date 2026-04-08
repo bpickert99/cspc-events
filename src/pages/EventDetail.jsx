@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { doc, getDoc, collection, query, where, getDocs, deleteDoc, writeBatch } from "firebase/firestore";
+import {
+  doc, getDoc, collection, query, where, getDocs, onSnapshot,
+  deleteDoc, writeBatch, updateDoc, serverTimestamp
+} from "firebase/firestore";
 import { db } from "../firebase";
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 function formatDate(ts) {
   if (!ts) return "Date TBD";
   const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -14,7 +18,95 @@ function fmt24(t) {
   const hr = parseInt(h, 10);
   return `${hr > 12 ? hr - 12 : hr || 12}:${m} ${hr >= 12 ? "PM" : "AM"}`;
 }
+function fmtDate(ts) {
+  if (!ts) return "";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+function daysSince(ts) {
+  if (!ts) return null;
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
 
+// ─── Stat card ─────────────────────────────────────────────────────────────────
+function Stat({ label, value, sub, color, onClick, active }) {
+  return (
+    <div onClick={onClick}
+      style={{ background: active ? "var(--navy)" : "var(--white)", border: `1.5px solid ${active ? "var(--navy)" : "var(--gray-100)"}`, borderRadius: "var(--radius-lg)", padding: "1rem 1.25rem", cursor: onClick ? "pointer" : "default", transition: "var(--transition)", flex: 1, minWidth: 100 }}
+      onMouseEnter={(e) => { if (onClick) { e.currentTarget.style.borderColor = "var(--navy)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+      onMouseLeave={(e) => { if (onClick) { e.currentTarget.style.borderColor = active ? "var(--navy)" : "var(--gray-100)"; e.currentTarget.style.transform = ""; } }}>
+      <div style={{ fontSize: "1.75rem", fontWeight: 800, color: active ? "var(--white)" : (color || "var(--gray-800)"), lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: "0.75rem", fontWeight: 600, color: active ? "rgba(255,255,255,.8)" : "var(--gray-500)", marginTop: "0.25rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      {sub && <div style={{ fontSize: "0.7rem", color: active ? "rgba(255,255,255,.6)" : "var(--gray-400)", marginTop: "0.125rem" }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Part badge ────────────────────────────────────────────────────────────────
+function PartBadge({ part, guest }) {
+  const status = guest.rsvpStatus;
+  let bg, color;
+  if (!status || status === "pending") { bg = "var(--navy-light)"; color = "var(--navy)"; }
+  else if (status === "no") { bg = "#FEE2E2"; color = "#B91C1C"; }
+  else {
+    const attending = (guest.rsvpParts?.length ? guest.rsvpParts : guest.invitedParts || []).includes(part.id);
+    bg = attending ? "#DCFCE7" : "#FEE2E2";
+    color = attending ? "#15803D" : "#B91C1C";
+  }
+  return <span style={{ padding: "0.125rem 0.5rem", borderRadius: 99, background: bg, fontSize: "0.7rem", fontWeight: 700, color, display: "inline-block" }}>{part.name}</span>;
+}
+
+// ─── Inline note editor ────────────────────────────────────────────────────────
+function InlineNote({ guestId, value }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value || "");
+  const save = async () => {
+    await updateDoc(doc(db, "guests", guestId), { notes: text, updatedAt: serverTimestamp() });
+    setEditing(false);
+  };
+  if (editing) return (
+    <div style={{ display: "flex", gap: "0.25rem", alignItems: "flex-start" }}>
+      <textarea value={text} onChange={(e) => setText(e.target.value)}
+        style={{ flex: 1, minHeight: 52, fontSize: "0.8rem", padding: "4px 6px", border: "1.5px solid var(--navy)", borderRadius: 5, fontFamily: "inherit", resize: "none" }} autoFocus />
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+        <button className="btn btn-primary btn-sm" onClick={save}>✓</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { setText(value || ""); setEditing(false); }}>✕</button>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", gap: "0.25rem", alignItems: "flex-start", cursor: "text" }} onClick={() => setEditing(true)}>
+      <span style={{ fontSize: "0.8rem", color: text ? "var(--gray-700)" : "var(--gray-300)", flex: 1, fontStyle: text ? "normal" : "italic" }}>{text || "Add note..."}</span>
+      <span style={{ fontSize: "0.65rem", color: "var(--gray-300)", flexShrink: 0 }}>✏️</span>
+    </div>
+  );
+}
+
+// ─── RSVP override dropdown ────────────────────────────────────────────────────
+function RsvpOverride({ guestId, value }) {
+  const [status, setStatus] = useState(value || "pending");
+  const onChange = async (e) => {
+    const v = e.target.value;
+    setStatus(v);
+    await updateDoc(doc(db, "guests", guestId), {
+      rsvpStatus: v, rsvpOverridden: true,
+      ...(v === "yes" || v === "no" ? { rsvpSubmittedAt: serverTimestamp() } : {}),
+      updatedAt: serverTimestamp(),
+    });
+  };
+  const colors = { pending: "var(--amber)", yes: "var(--green)", no: "var(--red)" };
+  return (
+    <select value={status} onChange={onChange}
+      style={{ fontSize: "0.75rem", padding: "0.2rem 0.4rem", border: `1.5px solid ${colors[status]}`, borderRadius: 6, background: "white", color: colors[status], fontWeight: 700, cursor: "pointer" }}>
+      <option value="pending">Pending</option>
+      <option value="yes">Attending</option>
+      <option value="no">Declined</option>
+    </select>
+  );
+}
+
+// ─── Main component ─────────────────────────────────────────────────────────────
 export default function EventDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -22,20 +114,28 @@ export default function EventDetail() {
   const [guests, setGuests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
+  const [filterPart, setFilterPart] = useState("all");
+  const [filterTag, setFilterTag] = useState("all");
 
+  // Real-time guest updates
   useEffect(() => {
     getDoc(doc(db, "events", id)).then((snap) => {
       if (snap.exists()) setEvent({ id: snap.id, ...snap.data() });
       setLoading(false);
     });
-    getDocs(query(collection(db, "guests"), where("eventId", "==", id))).then((snap) => {
-      setGuests(snap.docs.map((d) => d.data()));
+    const q = query(collection(db, "guests"), where("eventId", "==", id));
+    const unsub = onSnapshot(q, (snap) => {
+      setGuests(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
+    return unsub;
   }, [id]);
 
   const deleteEvent = async () => {
-    const confirmed = window.confirm(`Permanently delete "${event?.name}"?\n\nThis will remove the event and all ${guests.length} guest record(s). This cannot be undone.`);
-    if (!confirmed) return;
+    if (!confirm(`Permanently delete "${event?.name}" and all ${guests.length} guest records? This cannot be undone.`)) return;
     setDeleting(true);
     try {
       const guestSnap = await getDocs(query(collection(db, "guests"), where("eventId", "==", id)));
@@ -52,142 +152,333 @@ export default function EventDetail() {
     }
   };
 
+  const toggleSort = (field) => {
+    if (sortField === field) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  };
+
   if (loading) return <div className="loading">Loading...</div>;
   if (!event) return <div className="error-msg">Event not found.</div>;
 
-  // Only count primary guests (not plus ones) for stats
+  // ─── Stats ─────────────────────────────────────────────────────────────────
   const total = guests.length;
-  const sent = guests.filter((g) => g.emailSent).length;
   const attending = guests.filter((g) => g.rsvpStatus === "yes").length;
-  const plusOnesAttending = guests.filter((g) => g.plusOneRsvpStatus === "yes" && g.rsvpStatus === "yes").length;
-  const totalAttending = attending + plusOnesAttending;
+  const plusOnesAttending = guests.filter((g) => g.rsvpStatus === "yes" && g.plusOneRsvpStatus === "yes").length;
+  const totalHeadcount = attending + plusOnesAttending;
   const declined = guests.filter((g) => g.rsvpStatus === "no").length;
   const pending = guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length;
-  // Response rate: only count guests who were sent emails
+  const sent = guests.filter((g) => g.emailSent).length;
+  const opened = guests.filter((g) => g.emailOpened).length;
   const responded = attending + declined;
   const responseRate = sent > 0 ? Math.min(100, Math.round((responded / sent) * 100)) : 0;
+  const needsFollowUp = guests.filter((g) => g.emailSent && (!g.rsvpStatus || g.rsvpStatus === "pending") && daysSince(g.emailSentAt) >= 3);
 
+  const eventTags = event.tags || [];
+  const multiPart = (event.parts || []).length > 1;
+
+  // ─── Part breakdown ─────────────────────────────────────────────────────────
   const partBreakdown = (event.parts || []).map((part) => {
-    const invited = guests.filter((g) => (g.invitedParts || []).includes(part.id));
-    const att = guests.filter((g) =>
-      g.rsvpStatus === "yes" && (g.rsvpParts?.includes(part.id) ?? (g.invitedParts || []).includes(part.id))
-    );
+    const inv = guests.filter((g) => (g.invitedParts || []).includes(part.id));
+    const att = guests.filter((g) => g.rsvpStatus === "yes" && (g.rsvpParts?.includes(part.id) ?? true));
     const plusOnes = att.filter((g) => g.plusOneRsvpStatus === "yes").length;
-    const pend = invited.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending");
-    return { part, invited: invited.length, attending: att.length, plusOnes, pending: pend.length };
+    return { part, invited: inv.length, attending: att.length, plusOnes, headcount: att.length + plusOnes };
   });
 
-  const quickLinks = [
-    { to: `/events/${id}/guests`, icon: "👥", label: "Guests", desc: `${total} invited` },
-    { to: `/events/${id}/invitations`, icon: "✉️", label: "Invitations", desc: `${sent} sent` },
-    { to: `/events/${id}/tracking`, icon: "📊", label: "Tracking", desc: `${totalAttending} attending` },
-    ...(event.hasSeating ? [{ to: `/events/${id}/seating`, icon: "🪑", label: "Seating", desc: "Manage tables" }] : []),
-  ];
+  // ─── Filter guests ──────────────────────────────────────────────────────────
+  const filterFn = (g) => {
+    if (activeFilter === "attending") return g.rsvpStatus === "yes";
+    if (activeFilter === "declined") return g.rsvpStatus === "no";
+    if (activeFilter === "pending") return !g.rsvpStatus || g.rsvpStatus === "pending";
+    if (activeFilter === "followup") return g.emailSent && (!g.rsvpStatus || g.rsvpStatus === "pending") && daysSince(g.emailSentAt) >= 3;
+    if (activeFilter === "notsent") return !g.emailSent;
+    if (activeFilter === "opened") return g.emailOpened;
+    return true;
+  };
+
+  const searchFn = (g) => {
+    if (!search) return true;
+    const hay = `${g.title} ${g.firstName} ${g.lastName} ${g.email} ${g.staffPoc}`.toLowerCase();
+    return hay.includes(search.toLowerCase());
+  };
+
+  const partFn = (g) => filterPart === "all" || (g.invitedParts || []).includes(filterPart);
+  const tagFn = (g) => filterTag === "all" || (g.tags || []).includes(filterTag);
+
+  const filtered = guests.filter((g) => filterFn(g) && searchFn(g) && partFn(g) && tagFn(g));
+
+  const sorted = [...filtered].sort((a, b) => {
+    let va, vb;
+    if (sortField === "name") { va = `${a.lastName} ${a.firstName}`.toLowerCase(); vb = `${b.lastName} ${b.firstName}`.toLowerCase(); }
+    else if (sortField === "poc") { va = (a.staffPoc || "zzz").toLowerCase(); vb = (b.staffPoc || "zzz").toLowerCase(); }
+    else if (sortField === "rsvp") { va = a.rsvpSubmittedAt?.seconds || 0; vb = b.rsvpSubmittedAt?.seconds || 0; }
+    else if (sortField === "sent") { va = a.emailSentAt?.seconds || 0; vb = b.emailSentAt?.seconds || 0; }
+    else { va = ""; vb = ""; }
+    if (va < vb) return sortDir === "asc" ? -1 : 1;
+    if (va > vb) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  const SortTh = ({ field, label }) => (
+    <th onClick={() => toggleSort(field)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem" }}>
+        {label}
+        <span style={{ fontSize: "0.6rem", color: sortField === field ? "var(--navy)" : "var(--gray-300)" }}>
+          {sortField === field ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+        </span>
+      </span>
+    </th>
+  );
+
+  const filterBtn = (key, label, count, color) => (
+    <button onClick={() => setActiveFilter(key)}
+      style={{ padding: "0.375rem 0.875rem", borderRadius: 99, fontSize: "0.8125rem", fontWeight: 600, cursor: "pointer", border: "1.5px solid", transition: "var(--transition)", borderColor: activeFilter === key ? (color || "var(--navy)") : "var(--gray-200)", background: activeFilter === key ? (color || "var(--navy)") : "white", color: activeFilter === key ? "white" : "var(--gray-600)" }}>
+      {label} {count !== undefined && <span style={{ fontSize: "0.7rem", marginLeft: "0.2rem", opacity: 0.85 }}>({count})</span>}
+    </button>
+  );
+
+  // Dietary summary for all attending guests
+  const dietaryGuests = guests.filter((g) => g.rsvpStatus === "yes" && (
+    (g.rsvpData && Object.entries(g.rsvpData).some(([k, v]) => k.toLowerCase().includes("dietary") && v && v !== "None" && v !== "No" && v !== "N/A")) ||
+    (g.rsvpData && Object.entries(g.rsvpData).some(([k, v]) => k.toLowerCase().includes("allerg") && v && v !== "None"))
+  ));
+
+  const isPast = event.date && (event.date.toDate ? event.date.toDate() : new Date(event.date)) < new Date();
 
   return (
     <div>
-      <div className="page-header">
+      {/* ─── Header ──────────────────────────────────────────────────────── */}
+      <div className="page-header" style={{ marginBottom: "1.5rem" }}>
         <div>
-          <h1>{event.name}</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "0.25rem" }}>
+            {isPast && <span style={{ background: "var(--gray-100)", color: "var(--gray-500)", fontSize: "0.7rem", fontWeight: 700, padding: "0.125rem 0.5rem", borderRadius: 99, textTransform: "uppercase", letterSpacing: "0.06em" }}>Past</span>}
+            <h1 style={{ marginBottom: 0 }}>{event.name}</h1>
+          </div>
           <p>{formatDate(event.date)}{event.location ? ` · ${event.location.split(",")[0]}` : ""}</p>
-          {(event.coHosts || []).length > 0 && (
-            <p style={{ marginTop: "0.25rem", fontSize: "0.8125rem", color: "var(--gray-400)" }}>Co-hosts: {event.coHosts.join(", ")}</p>
+          {multiPart && (
+            <div style={{ display: "flex", gap: "0.375rem", marginTop: "0.375rem", flexWrap: "wrap" }}>
+              {event.parts.map((p) => (
+                <span key={p.id} style={{ fontSize: "0.8rem", color: "var(--gray-500)" }}>
+                  {p.name}{p.startTime ? ` ${fmt24(p.startTime)}` : ""}{p.endTime ? ` – ${fmt24(p.endTime)}` : ""}
+                </span>
+              )).reduce((acc, el, i) => [...acc, i > 0 ? <span key={`sep-${i}`} style={{ color: "var(--gray-300)" }}>·</span> : null, el], [])}
+            </div>
           )}
         </div>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/events/${id}/edit`)}>Edit Event</button>
+          <Link to={`/events/${id}/guests`} className="btn btn-secondary btn-sm">👥 Guests</Link>
+          <Link to={`/events/${id}/invitations`} className="btn btn-secondary btn-sm">✉️ Invitations</Link>
+          {event.hasSeating && <Link to={`/events/${id}/seating`} className="btn btn-secondary btn-sm">🪑 Seating</Link>}
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/events/${id}/edit`)}>Edit</button>
           <button className="btn btn-danger btn-sm" onClick={deleteEvent} disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</button>
         </div>
       </div>
 
-      <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-value">{total}</div>
-          <div className="stat-label">Guests Invited</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value" style={{ color: "var(--green)" }}>{attending}</div>
-          <div className="stat-label">Attending</div>
-          {plusOnesAttending > 0 && <div style={{ fontSize: "0.75rem", color: "var(--gold-dark)", marginTop: "0.25rem" }}>+ {plusOnesAttending} plus one{plusOnesAttending !== 1 ? "s" : ""}</div>}
-        </div>
-        <div className="stat-card">
-          <div className="stat-value" style={{ color: "var(--green)", fontSize: "1.75rem" }}>{totalAttending}</div>
-          <div className="stat-label">Total Seats Needed</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value" style={{ color: "var(--amber)" }}>{pending}</div>
-          <div className="stat-label">Awaiting Response</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value" style={{ color: "var(--red)" }}>{declined}</div>
-          <div className="stat-label">Declined</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value" style={{ color: "var(--navy)" }}>{responseRate}%</div>
-          <div className="stat-label">Response Rate</div>
-        </div>
+      {/* ─── Stats ───────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
+        <Stat label="Invited" value={total} onClick={() => setActiveFilter("all")} active={activeFilter === "all"} />
+        <Stat label="Attending" value={attending} sub={plusOnesAttending > 0 ? `+${plusOnesAttending} plus one${plusOnesAttending !== 1 ? "s" : ""}` : undefined} color="var(--green)" onClick={() => setActiveFilter("attending")} active={activeFilter === "attending"} />
+        <Stat label="Total Seats" value={totalHeadcount} color="var(--green)" sub="guests + plus ones" />
+        <Stat label="Pending" value={pending} color="var(--amber)" onClick={() => setActiveFilter("pending")} active={activeFilter === "pending"} />
+        <Stat label="Declined" value={declined} color="var(--red)" onClick={() => setActiveFilter("declined")} active={activeFilter === "declined"} />
+        <Stat label="Response Rate" value={`${responseRate}%`} sub={`${responded} of ${sent} emailed`} color="var(--navy)" />
+        {needsFollowUp.length > 0 && (
+          <Stat label="Follow-Up Needed" value={needsFollowUp.length} sub="sent 3+ days ago" color="var(--amber)" onClick={() => setActiveFilter("followup")} active={activeFilter === "followup"} />
+        )}
       </div>
 
-      {partBreakdown.length > 1 && (
-        <div className="card" style={{ marginBottom: "1.25rem" }}>
-          <div className="card-header"><h2>Attendance by Part</h2></div>
-          <div className="card-body" style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-            {partBreakdown.map(({ part, invited, attending, plusOnes, pending }) => (
-              <div key={part.id} style={{ flex: "1", minWidth: 180, background: "var(--gray-50)", borderRadius: "var(--radius)", padding: "1rem", border: "1px solid var(--gray-100)" }}>
-                <div style={{ fontWeight: 700, color: "var(--navy)", marginBottom: "0.625rem" }}>
-                  {part.name}
-                  {part.startTime && <span style={{ fontWeight: 400, fontSize: "0.8125rem", color: "var(--gray-400)", marginLeft: "0.5rem" }}>{fmt24(part.startTime)}</span>}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", fontSize: "0.875rem" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "var(--gray-500)" }}>Invited</span><strong>{invited}</strong></div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "var(--green)" }}>Attending</span><strong style={{ color: "var(--green)" }}>{attending}{plusOnes > 0 ? ` + ${plusOnes}` : ""}</strong></div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "var(--amber)" }}>Pending</span><strong style={{ color: "var(--amber)" }}>{pending}</strong></div>
-                </div>
-                <div className="progress-bar">
-                  <div className="progress-fill green" style={{ width: invited > 0 ? `${(attending / invited) * 100}%` : "0%" }} />
-                </div>
+      {/* ─── Response rate bar ────────────────────────────────────────────── */}
+      {sent > 0 && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "var(--gray-500)", marginBottom: "0.375rem" }}>
+            <span>{responded} responded of {sent} emailed · {opened} opened</span>
+            <span style={{ fontWeight: 700, color: "var(--navy)" }}>{responseRate}%</span>
+          </div>
+          <div style={{ height: 8, background: "var(--gray-100)", borderRadius: 99, overflow: "hidden", display: "flex" }}>
+            <div style={{ width: `${(attending / Math.max(sent, 1)) * 100}%`, background: "var(--green)", transition: "width 0.4s" }} />
+            <div style={{ width: `${(declined / Math.max(sent, 1)) * 100}%`, background: "var(--red)", transition: "width 0.4s" }} />
+          </div>
+          <div style={{ display: "flex", gap: "1rem", marginTop: "0.375rem", fontSize: "0.75rem", color: "var(--gray-400)" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><span style={{ width: 8, height: 8, borderRadius: 99, background: "var(--green)", display: "inline-block" }} />Attending</span>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><span style={{ width: 8, height: 8, borderRadius: 99, background: "var(--red)", display: "inline-block" }} />Declined</span>
+            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><span style={{ width: 8, height: 8, borderRadius: 99, background: "var(--gray-100)", border: "1px solid var(--gray-200)", display: "inline-block" }} />Pending</span>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Per-part breakdown ───────────────────────────────────────────── */}
+      {multiPart && (
+        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
+          {partBreakdown.map(({ part, invited, attending, headcount }) => (
+            <div key={part.id} style={{ flex: 1, minWidth: 160, background: "var(--white)", border: "1px solid var(--gray-100)", borderRadius: "var(--radius-lg)", padding: "0.875rem 1rem" }}>
+              <div style={{ fontWeight: 700, color: "var(--navy)", marginBottom: "0.5rem", fontSize: "0.9375rem" }}>{part.name}</div>
+              <div style={{ fontSize: "0.8rem", color: "var(--gray-500)", display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Invited</span><strong style={{ color: "var(--gray-700)" }}>{invited}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Attending</span><strong style={{ color: "var(--green)" }}>{attending}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Total Seats</span><strong style={{ color: "var(--green)" }}>{headcount}</strong></div>
               </div>
-            ))}
-          </div>
+              <div style={{ marginTop: "0.5rem", height: 4, background: "var(--gray-100)", borderRadius: 99, overflow: "hidden" }}>
+                <div style={{ width: invited > 0 ? `${Math.min(100, (attending / invited) * 100)}%` : "0%", height: "100%", background: "var(--green)", transition: "width 0.4s" }} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "1rem", marginBottom: "1.75rem" }}>
-        {quickLinks.map((link) => (
-          <Link key={link.to} to={link.to} style={{ textDecoration: "none" }}>
-            <div className="card" style={{ padding: "1.25rem", cursor: "pointer", transition: "var(--transition)" }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--navy)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = ""; e.currentTarget.style.boxShadow = ""; e.currentTarget.style.transform = ""; }}>
-              <div style={{ fontSize: "1.375rem", marginBottom: "0.5rem" }}>{link.icon}</div>
-              <div style={{ fontWeight: 700, color: "var(--gray-700)", fontSize: "0.9375rem" }}>{link.label}</div>
-              <div style={{ fontSize: "0.8125rem", color: "var(--gray-400)", marginTop: "0.25rem" }}>{link.desc}</div>
-            </div>
-          </Link>
-        ))}
+      {/* ─── Dietary alert ────────────────────────────────────────────────── */}
+      {dietaryGuests.length > 0 && (
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: "var(--radius)", padding: "0.75rem 1rem", marginBottom: "1.25rem", fontSize: "0.875rem", color: "#92400E" }}>
+          🍽 <strong>{dietaryGuests.length} attending guest{dietaryGuests.length !== 1 ? "s" : ""}</strong> {dietaryGuests.length === 1 ? "has" : "have"} dietary restrictions or allergies. <button className="btn btn-ghost btn-sm" style={{ color: "#92400E", fontSize: "0.8rem" }} onClick={() => setActiveFilter("attending")}>View →</button>
+        </div>
+      )}
+
+      {/* ─── Guest table ──────────────────────────────────────────────────── */}
+      <div className="card">
+        <div style={{ padding: "0.875rem 1.25rem", borderBottom: "1px solid var(--gray-100)", display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+          {/* Quick filter pills */}
+          <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
+            {filterBtn("all", "All", total)}
+            {filterBtn("attending", "Attending", attending, "var(--green)")}
+            {filterBtn("pending", "Pending", pending, "var(--amber)")}
+            {filterBtn("declined", "Declined", declined, "var(--red)")}
+            {needsFollowUp.length > 0 && filterBtn("followup", "Follow-Up", needsFollowUp.length, "#D97706")}
+            {filterBtn("notsent", "Not Sent", guests.filter((g) => !g.emailSent).length)}
+            {filterBtn("opened", "Opened Email", opened, "var(--navy)")}
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+            {/* Part filter */}
+            {multiPart && (
+              <select className="form-select" style={{ width: "auto", fontSize: "0.8125rem" }} value={filterPart} onChange={(e) => setFilterPart(e.target.value)}>
+                <option value="all">All parts</option>
+                {event.parts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            {/* Tag filter */}
+            {eventTags.length > 0 && (
+              <select className="form-select" style={{ width: "auto", fontSize: "0.8125rem" }} value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
+                <option value="all">All tags</option>
+                {eventTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            {/* Search */}
+            <input className="form-input" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)}
+              style={{ width: 180, fontSize: "0.8125rem" }} />
+            <span style={{ fontSize: "0.8rem", color: "var(--gray-400)", whiteSpace: "nowrap" }}>{sorted.length} shown</span>
+          </div>
+        </div>
+
+        {guests.length === 0 ? (
+          <div className="empty-state">
+            <div className="icon">👥</div>
+            <h3>No guests yet</h3>
+            <Link to={`/events/${id}/guests`} className="btn btn-primary" style={{ marginTop: "1rem" }}>Add Guests</Link>
+          </div>
+        ) : sorted.length === 0 ? (
+          <div className="empty-state"><h3>No guests match this filter</h3></div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <SortTh field="name" label="Name" />
+                  {multiPart && <th>Parts</th>}
+                  <th>Email</th>
+                  <SortTh field="rsvp" label="RSVP" />
+                  <th>Plus One</th>
+                  <th>Dietary</th>
+                  <SortTh field="poc" label="POC" />
+                  <SortTh field="sent" label="Email Sent" />
+                  <th>Notes</th>
+                  <th>Override</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((g) => {
+                  const hasDietary = g.rsvpData && Object.entries(g.rsvpData).some(([k, v]) => (k.toLowerCase().includes("dietary") || k.toLowerCase().includes("allerg")) && v && v !== "None" && v !== "No");
+                  const dietary = g.rsvpData ? Object.entries(g.rsvpData).filter(([k]) => k.toLowerCase().includes("dietary") || k.toLowerCase().includes("allerg")).map(([, v]) => v).filter(Boolean).join(", ") : "";
+                  const daysAgo = g.emailSentAt ? daysSince(g.emailSentAt) : null;
+                  const flagFollowUp = g.emailSent && (!g.rsvpStatus || g.rsvpStatus === "pending") && daysAgo >= 3;
+
+                  return (
+                    <tr key={g.id} style={{ background: flagFollowUp ? "#FFFBEB" : undefined }}>
+                      <td>
+                        <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
+                          {flagFollowUp && <span title="Needs follow-up" style={{ marginRight: 4 }}>⚠️</span>}
+                          {g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}
+                        </div>
+                        <div style={{ fontSize: "0.75rem", color: "var(--gray-400)" }}>{g.email}</div>
+                        {(g.tags || []).length > 0 && (
+                          <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", marginTop: "0.2rem" }}>
+                            {g.tags.map((tid) => { const tag = eventTags.find((t) => t.id === tid); return tag ? <span key={tid} style={{ padding: "0 0.375rem", borderRadius: 99, background: tag.color + "22", fontSize: "0.65rem", fontWeight: 700, color: tag.color }}>{tag.name}</span> : null; })}
+                          </div>
+                        )}
+                      </td>
+                      {multiPart && (
+                        <td>
+                          <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                            {(g.invitedParts || []).map((pid) => { const p = event.parts.find((x) => x.id === pid); return p ? <PartBadge key={pid} part={p} guest={g} /> : null; })}
+                          </div>
+                        </td>
+                      )}
+                      <td style={{ fontSize: "0.8rem" }}>
+                        {!g.emailSent ? <span style={{ color: "var(--gray-400)" }}>Not sent</span>
+                          : g.emailBounced ? <span className="badge badge-bounced">Bounced</span>
+                          : g.emailOpened ? <span className="badge badge-opened">Opened</span>
+                          : <span className="badge badge-sent">Sent</span>}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+                          <span className={`badge badge-${g.rsvpStatus || "pending"}`} style={{ fontSize: "0.75rem" }}>
+                            {g.rsvpStatus === "yes" ? "Attending" : g.rsvpStatus === "no" ? "Declined" : "Pending"}
+                          </span>
+                          {g.rsvpSubmittedAt && <span style={{ fontSize: "0.7rem", color: "var(--gray-400)" }}>{fmtDate(g.rsvpSubmittedAt)}</span>}
+                          {g.rsvpOverridden && <span title="Staff edited" style={{ fontSize: "0.65rem", color: "var(--amber)" }}>★</span>}
+                        </div>
+                      </td>
+                      <td style={{ fontSize: "0.8rem" }}>
+                        {(g.plusOneLimit > 0 || g.plusOneEligible) ? (
+                          <div>
+                            <div style={{ fontWeight: 600, color: g.plusOneRsvpStatus === "yes" ? "var(--green)" : "var(--gray-400)" }}>
+                              {g.plusOneRsvpStatus === "yes" ? "✓ Attending" : g.plusOneRsvpStatus === "no" ? "✗ Declined" : "—"}
+                            </div>
+                            {g.plusOneRsvpName && <div style={{ fontSize: "0.75rem", color: "var(--gray-500)" }}>{g.plusOneRsvpName}</div>}
+                          </div>
+                        ) : <span style={{ color: "var(--gray-300)" }}>—</span>}
+                      </td>
+                      <td style={{ fontSize: "0.8rem", maxWidth: 160 }}>
+                        {hasDietary
+                          ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>🍽 {dietary}</span>
+                          : <span style={{ color: "var(--gray-300)" }}>—</span>}
+                      </td>
+                      <td style={{ fontSize: "0.8rem", color: "var(--gray-500)" }}>{g.staffPoc || "—"}</td>
+                      <td style={{ fontSize: "0.75rem", color: "var(--gray-400)", whiteSpace: "nowrap" }}>
+                        {g.emailSentAt ? (
+                          <div>
+                            <div>{fmtDate(g.emailSentAt)}</div>
+                            {daysAgo !== null && <div style={{ color: flagFollowUp ? "var(--amber)" : "var(--gray-300)" }}>{daysAgo === 0 ? "today" : `${daysAgo}d ago`}</div>}
+                          </div>
+                        ) : "—"}
+                      </td>
+                      <td style={{ minWidth: 140 }}>
+                        <InlineNote guestId={g.id} value={g.notes} />
+                      </td>
+                      <td>
+                        <RsvpOverride guestId={g.id} value={g.rsvpStatus} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {(event.tags || []).length > 0 && (
-        <div className="card" style={{ marginBottom: "1.25rem" }}>
-          <div className="card-header"><h2>Guest Tags</h2></div>
-          <div className="card-body" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            {event.tags.map((tag) => (
-              <span key={tag.id} style={{ padding: "0.25rem 0.875rem", borderRadius: "99px", background: tag.color + "22", fontSize: "0.8125rem", fontWeight: 700, color: tag.color, border: `1px solid ${tag.color}44` }}>{tag.name}</span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {(event.customFields || []).length > 0 && (
-        <div className="card">
-          <div className="card-header"><h2>RSVP Form Fields</h2></div>
-          <div className="card-body">
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.875rem" }}>
-              {event.customFields.map((f) => <span key={f.id} className="tag">{f.label}</span>)}
-            </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/events/${id}/edit`)}>Edit Fields</button>
-          </div>
-        </div>
-      )}
+      {/* ─── Quick links ──────────────────────────────────────────────────── */}
+      <div style={{ marginTop: "1.25rem", display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+        <Link to={`/events/${id}/guests`} className="btn btn-secondary">👥 Manage Guests</Link>
+        <Link to={`/events/${id}/invitations`} className="btn btn-secondary">✉️ Send Invitations</Link>
+        {event.hasSeating && <Link to={`/events/${id}/seating`} className="btn btn-secondary">🪑 Seating Manager</Link>}
+      </div>
     </div>
   );
 }
