@@ -95,6 +95,7 @@ export default function EventCreate() {
   const [dateStr, setDateStr] = useState("");
   const [location, setLocation] = useState("");
   const [hasSeating, setHasSeating] = useState(false);
+  const [seatingParts, setSeatingParts] = useState([]);
   const [parts, setParts] = useState(DEFAULT_PARTS);
   const [customFields, setCustomFields] = useState([]);
   const [coHosts, setCoHosts] = useState([]);
@@ -108,6 +109,7 @@ export default function EventCreate() {
       setName(d.name || "");
       setLocation(d.location || "");
       setHasSeating(d.hasSeating || false);
+      setSeatingParts(d.seatingParts || []);
       setParts(d.parts || DEFAULT_PARTS);
       setCustomFields(d.customFields || []);
       setCoHosts(d.coHosts || []);
@@ -151,7 +153,7 @@ export default function EventCreate() {
     setError("");
     try {
       const dateObj = dateStr ? Timestamp.fromDate(new Date(dateStr + "T12:00:00")) : null;
-      const payload = { name: name.trim(), date: dateObj, location: location.trim(), hasSeating, parts, customFields, coHosts, updatedAt: serverTimestamp() };
+      const payload = { name: name.trim(), date: dateObj, location: location.trim(), hasSeating, seatingParts, parts, customFields, coHosts, updatedAt: serverTimestamp() };
       if (isEdit) {
         await updateDoc(doc(db, "events", id), payload);
         navigate(`/events/${id}`);
@@ -199,9 +201,24 @@ export default function EventCreate() {
               <LocationInput value={location} onChange={setLocation} />
             </div>
             <label className="checkbox-label">
-              <input type="checkbox" checked={hasSeating} onChange={(e) => setHasSeating(e.target.checked)} />
+              <input type="checkbox" checked={hasSeating} onChange={(e) => { setHasSeating(e.target.checked); if (!e.target.checked) setSeatingParts([]); }} />
               This event has assigned seating (enables seating manager)
             </label>
+            {hasSeating && parts.length > 1 && (
+              <div style={{ marginTop: "0.75rem", padding: "0.875rem", background: "var(--gray-50)", borderRadius: "var(--radius)", border: "1px solid var(--gray-200)" }}>
+                <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--gray-600)", marginBottom: "0.5rem" }}>Which parts require seating?</div>
+                <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+                  {parts.map((p) => (
+                    <label key={p.id} className="checkbox-label" style={{ fontSize: "0.875rem" }}>
+                      <input type="checkbox"
+                        checked={seatingParts.includes(p.id)}
+                        onChange={() => setSeatingParts((prev) => prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id])} />
+                      {p.name || `Part ${parts.indexOf(p) + 1}`}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

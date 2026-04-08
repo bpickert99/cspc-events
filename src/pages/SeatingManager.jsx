@@ -131,10 +131,14 @@ export default function SeatingManager() {
     })();
   }, [id]);
 
+  const [saveMsg, setSaveMsg] = useState("");
+
   const save = async () => {
     setSaving(true);
     await setDoc(doc(db, "seating", id), { tables, assignments, updatedAt: serverTimestamp() });
     setSaving(false);
+    setSaveMsg("Saved ✓");
+    setTimeout(() => setSaveMsg(""), 2500);
   };
 
   // Filter guests by selected part
@@ -227,15 +231,24 @@ export default function SeatingManager() {
 
   // ─── Excel export ────────────────────────────────────────────────────────────
   const exportExcel = () => {
-    const rows = [["Table", "Seat #", "Name", "Plus One of", "Dietary Restrictions", "RSVP Status"]];
+    const now = new Date();
+    const timestamp = now.toLocaleString("en-US", {
+      month: "2-digit", day: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: true,
+    }).replace(/[/:]/g, "-").replace(/,/g, "").replace(/\s/g, "_");
+
+    const rows = [
+      [`Seating Chart — ${event?.name || "Event"}`, "", "", "", "", ""],
+      [`Downloaded: ${now.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`, "", "", "", "", ""],
+      ["", "", "", "", "", ""],
+      ["Table", "Seat #", "Name", "Plus One of", "Dietary Restrictions", "RSVP Status"],
+    ];
     tables.forEach((table) => {
       for (let i = 0; i < table.seats; i++) {
         const occupant = getOccupant(table.id, i);
         if (occupant) {
           rows.push([
-            table.name,
-            i + 1,
-            occupant.displayName,
+            table.name, i + 1, occupant.displayName,
             occupant.isPlusOne ? occupant.primaryName : "",
             occupant.dietary || "",
             occupant.isPlusOne ? "Plus One" : "Attending",
@@ -250,7 +263,7 @@ export default function SeatingManager() {
     ws["!cols"] = [{ wch: 18 }, { wch: 8 }, { wch: 30 }, { wch: 25 }, { wch: 30 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Seating");
-    XLSX.writeFile(wb, `${event?.name || "seating"}_seating.xlsx`);
+    XLSX.writeFile(wb, `${(event?.name || "seating").replace(/[^a-z0-9]/gi, "_")}_seating_${timestamp}.xlsx`);
   };
 
   if (loading) return <div className="loading">Loading seating...</div>;
@@ -273,7 +286,10 @@ export default function SeatingManager() {
         <div className="page-actions">
           <button className="btn btn-secondary btn-sm" onClick={exportExcel}>⬇ Export Excel</button>
           <button className="btn btn-secondary btn-sm" onClick={addTable}>＋ Add Table</button>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Saving..." : "Save Seating"}</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}
+            style={{ background: saveMsg ? "var(--green)" : undefined, transition: "background 0.3s" }}>
+            {saving ? "Saving..." : saveMsg || "Save Seating"}
+          </button>
         </div>
       </div>
 

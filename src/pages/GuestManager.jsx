@@ -18,6 +18,134 @@ const PLUS_ONE_OPTIONS = [
   { value: "-1", label: "Unlimited" },
 ];
 
+// ─── CSV Field definitions ─────────────────────────────────────────────────────
+const CSV_FIELDS = [
+  { key: "firstName",  label: "First Name",       required: true },
+  { key: "lastName",   label: "Last Name",         required: false },
+  { key: "title",      label: "Title / Honorific", required: false },
+  { key: "email",      label: "Email",             required: true },
+  { key: "staffPoc",   label: "Staff POC",         required: false },
+  { key: "plusOne",    label: "Plus One (yes/no)", required: false },
+  { key: "notes",      label: "Notes",             required: false },
+  { key: "ignore",     label: "— Ignore —",        required: false },
+];
+
+// ─── CSV Column Mapper Modal ───────────────────────────────────────────────────
+function CSVMapperModal({ csvText, onConfirm, onCancel }) {
+  const lines = csvText.split("\n").filter(Boolean);
+  const rawHeaders = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+  const previewRows = lines.slice(1, 4).map((l) => l.split(",").map((c) => c.trim().replace(/^"|"$/g, "")));
+
+  // Auto-detect mappings
+  const autoMap = (h) => {
+    const norm = h.toLowerCase().replace(/[\s_-]/g, "");
+    if (norm.includes("first")) return "firstName";
+    if (norm.includes("last")) return "lastName";
+    if (norm.includes("title") || norm.includes("honor")) return "title";
+    if (norm.includes("email")) return "email";
+    if (norm.includes("poc") || norm.includes("staff")) return "staffPoc";
+    if (norm.includes("plus") || norm.includes("guest")) return "plusOne";
+    if (norm.includes("note")) return "notes";
+    return "ignore";
+  };
+
+  const [mappings, setMappings] = useState(() => rawHeaders.map(autoMap));
+  const [importing, setImporting] = useState(false);
+
+  const missingRequired = CSV_FIELDS.filter((f) => f.required && !mappings.includes(f.key)).map((f) => f.label);
+
+  const handleConfirm = async () => {
+    if (missingRequired.length > 0) {
+      alert(`Please map required fields: ${missingRequired.join(", ")}`);
+      return;
+    }
+    setImporting(true);
+    const rows = lines.slice(1).map((line) => {
+      const cells = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+      const row = {};
+      mappings.forEach((fieldKey, i) => {
+        if (fieldKey && fieldKey !== "ignore") row[fieldKey] = cells[i] || "";
+      });
+      return row;
+    }).filter((r) => r.firstName || r.email);
+    onConfirm(rows);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="modal" style={{ maxWidth: 720, width: "95vw" }}>
+        <div className="modal-header">
+          <h3>Map CSV Columns</h3>
+          <button className="btn btn-ghost btn-sm" onClick={onCancel}>✕</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: "0.875rem", color: "var(--gray-500)", marginBottom: "1.25rem" }}>
+            We detected {rawHeaders.length} column{rawHeaders.length !== 1 ? "s" : ""}. Match each column to a guest field, or choose "Ignore" to skip it.
+          </p>
+
+          {missingRequired.length > 0 && (
+            <div style={{ background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: "var(--radius)", padding: "0.625rem 0.875rem", fontSize: "0.8125rem", color: "#92400E", marginBottom: "1rem" }}>
+              ⚠️ Required fields not yet mapped: <strong>{missingRequired.join(", ")}</strong>
+            </div>
+          )}
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+              <thead>
+                <tr style={{ background: "var(--gray-50)", borderBottom: "2px solid var(--gray-200)" }}>
+                  <th style={{ padding: "0.5rem 0.75rem", textAlign: "left", fontWeight: 700, color: "var(--gray-600)", whiteSpace: "nowrap" }}>CSV Column</th>
+                  <th style={{ padding: "0.5rem 0.75rem", textAlign: "left", fontWeight: 700, color: "var(--gray-600)" }}>Maps to</th>
+                  {previewRows.map((_, i) => (
+                    <th key={i} style={{ padding: "0.5rem 0.75rem", textAlign: "left", fontWeight: 700, color: "var(--gray-400)", fontSize: "0.75rem" }}>Row {i + 1}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rawHeaders.map((header, col) => (
+                  <tr key={col} style={{ borderBottom: "1px solid var(--gray-100)" }}>
+                    <td style={{ padding: "0.5rem 0.75rem", fontWeight: 600, color: "var(--gray-700)", whiteSpace: "nowrap" }}>{header}</td>
+                    <td style={{ padding: "0.5rem 0.75rem" }}>
+                      <select
+                        value={mappings[col]}
+                        onChange={(e) => {
+                          const next = [...mappings];
+                          next[col] = e.target.value;
+                          setMappings(next);
+                        }}
+                        style={{ padding: "0.25rem 0.5rem", border: "1.5px solid var(--gray-200)", borderRadius: "var(--radius)", fontSize: "0.8125rem", background: mappings[col] === "ignore" ? "var(--gray-50)" : "var(--navy-xlight)", color: mappings[col] === "ignore" ? "var(--gray-400)" : "var(--navy)", fontWeight: mappings[col] === "ignore" ? 400 : 600 }}>
+                        {CSV_FIELDS.map((f) => (
+                          <option key={f.key} value={f.key}>
+                            {f.label}{f.required ? " *" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    {previewRows.map((row, ri) => (
+                      <td key={ri} style={{ padding: "0.5rem 0.75rem", color: "var(--gray-500)", fontSize: "0.8rem", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {row[col] || <span style={{ color: "var(--gray-300)" }}>—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ marginTop: "1rem", fontSize: "0.8125rem", color: "var(--gray-400)" }}>
+            {lines.length - 1} guest{lines.length - 2 !== 0 ? "s" : ""} will be imported · <span style={{ color: "var(--red)" }}>*</span> Required
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleConfirm} disabled={importing}>
+            {importing ? "Importing..." : `Import ${lines.length - 1} Guest${lines.length - 2 !== 0 ? "s" : ""}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TAG_COLORS = ["#1B2B6B","#C9A84C","#38A169","#E53E3E","#7C3AED","#0D9488","#D97706","#DB2777"];
 
 function PartTag({ part, guest }) {
@@ -220,6 +348,7 @@ export default function GuestManager() {
   const [guests, setGuests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
+  const [csvRawText, setCsvRawText] = useState(null);
   const [search, setSearch] = useState("");
   const [filterPart, setFilterPart] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -331,26 +460,45 @@ export default function GuestManager() {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const lines = ev.target.result.split("\n").filter(Boolean);
-      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/\s+/g, ""));
-      const batch = writeBatch(db);
-      let count = 0;
-      for (let i = 1; i < lines.length; i++) {
-        const cells = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
-        const row = {};
-        headers.forEach((h, j) => { row[h] = cells[j] || ""; });
-        if (!row.email && !row.firstname) continue;
-        const hasPlus = (row.plusone || "").toLowerCase() === "yes";
-        const ref = doc(collection(db, "guests"));
-        batch.set(ref, { eventId: id, firstName: row.firstname || "", lastName: row.lastname || "", title: row.title || "", email: row.email || "", staffPoc: row.staffpoc || "", invitedParts: (event?.parts || []).map((p) => p.id), plusOneEligible: hasPlus, plusOneLimit: hasPlus ? 1 : 0, staffPlusOneNames: [""], plusOneName: "", tags: [], notes: row.notes || "", rsvpToken: uuid(), rsvpStatus: "pending", rsvpParts: [], rsvpData: {}, emailSent: false, emailOpened: false, emailBounced: false, createdAt: serverTimestamp() });
-        count++;
-      }
-      await batch.commit();
-      alert(`Imported ${count} guests.`);
+    reader.onload = (ev) => {
+      setCsvRawText(ev.target.result);
     };
     reader.readAsText(file);
     csvRef.current.value = "";
+  };
+
+  const confirmImport = async (rows) => {
+    const batch = writeBatch(db);
+    rows.forEach((row) => {
+      const hasPlus = (row.plusOne || "").toLowerCase() === "yes";
+      const ref = doc(collection(db, "guests"));
+      batch.set(ref, {
+        eventId: id,
+        firstName: row.firstName || "",
+        lastName: row.lastName || "",
+        title: row.title || "",
+        email: row.email || "",
+        staffPoc: row.staffPoc || "",
+        invitedParts: (event?.parts || []).map((p) => p.id),
+        plusOneEligible: hasPlus,
+        plusOneLimit: hasPlus ? 1 : 0,
+        staffPlusOneNames: [""],
+        plusOneName: "",
+        tags: [],
+        notes: row.notes || "",
+        rsvpToken: uuid(),
+        rsvpStatus: "pending",
+        rsvpParts: [],
+        rsvpData: {},
+        emailSent: false,
+        emailOpened: false,
+        emailBounced: false,
+        createdAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+    setCsvRawText(null);
+    alert(`Imported ${rows.length} guest${rows.length !== 1 ? "s" : ""}.`);
   };
 
   const eventTags = event?.tags || [];
@@ -399,14 +547,14 @@ export default function GuestManager() {
           <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", flexWrap: "wrap" }}>
             <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0 }}>Tags</span>
             {eventTags.map((tag) => (
-              <div key={tag.id} style={{ display: "flex", alignItems: "center" }}>
+              <div key={tag.id} style={{ display: "inline-flex", alignItems: "stretch", height: 28 }}>
                 <button onClick={() => setQuickTagMode(quickTagMode === tag.id ? null : tag.id)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", padding: "0.25rem 0.625rem", borderRadius: "99px 0 0 99px", background: quickTagMode === tag.id ? tag.color : tag.color + "22", color: quickTagMode === tag.id ? "white" : tag.color, border: `1.5px solid ${tag.color}`, borderRight: "none", fontSize: "0.8125rem", fontWeight: 700, cursor: "pointer", transition: "var(--transition)" }}>
+                  style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", padding: "0 0.625rem", borderRadius: "99px 0 0 99px", background: quickTagMode === tag.id ? tag.color : tag.color + "22", color: quickTagMode === tag.id ? "white" : tag.color, border: `1.5px solid ${tag.color}`, borderRight: "none", fontSize: "0.8rem", fontWeight: 700, cursor: "pointer", transition: "var(--transition)", lineHeight: 1 }}>
                   {quickTagMode === tag.id ? "✦ " : ""}{tag.name}
                   {quickTagMode === tag.id && <span style={{ fontSize: "0.65rem", fontWeight: 400 }}>({guests.filter((g) => (g.tags || []).includes(tag.id)).length})</span>}
                 </button>
                 <button onClick={() => deleteTag(tag.id)}
-                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: "0 99px 99px 0", background: tag.color + "22", color: tag.color, border: `1.5px solid ${tag.color}`, borderLeft: "none", fontSize: "0.65rem", cursor: "pointer" }}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, borderRadius: "0 99px 99px 0", background: tag.color + "22", color: tag.color, border: `1.5px solid ${tag.color}`, borderLeft: "none", fontSize: "0.65rem", cursor: "pointer", lineHeight: 1 }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "#FEE2E2"; e.currentTarget.style.color = "var(--red)"; e.currentTarget.style.borderColor = "var(--red)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = tag.color + "22"; e.currentTarget.style.color = tag.color; e.currentTarget.style.borderColor = tag.color; }}>✕</button>
               </div>
@@ -562,7 +710,9 @@ export default function GuestManager() {
                             <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--gray-700)" }}>{po.name}</span>
                             {po.source === "staff" && <span style={{ fontSize: "0.65rem", color: "var(--gray-400)", fontStyle: "italic" }}>staff-entered</span>}
                           </div>
-                          {g.rsvpData?.["Plus one dietary restrictions"] && <div style={{ fontSize: "0.7rem", color: "var(--amber)", marginTop: "0.125rem", paddingLeft: "2rem" }}>🍽 {g.rsvpData["Plus one dietary restrictions"]}</div>}
+                          {g.rsvpData && Object.entries(g.rsvpData).filter(([k]) => k.toLowerCase().includes("dietary") || k.toLowerCase().includes("allerg") || k.toLowerCase().includes("plus one")).map(([k, v]) => (
+                            v ? <div key={k} style={{ fontSize: "0.7rem", color: "var(--amber)", marginTop: "0.125rem", paddingLeft: "2rem" }}>🍽 {v}</div> : null
+                          ))}
                         </td>
                         <td colSpan={multiPart ? 2 : 1} />
                         <td><span style={{ fontSize: "0.75rem", color: "var(--gold-dark)", fontWeight: 600 }}>+1 of {g.firstName} {g.lastName}</span></td>
@@ -592,6 +742,7 @@ export default function GuestManager() {
       </div>
 
       {modal && <GuestModal event={event} guest={modal === "add" ? null : modal} onClose={() => setModal(null)} onSave={saveGuest} />}
+      {csvRawText && <CSVMapperModal csvText={csvRawText} onConfirm={confirmImport} onCancel={() => { setCsvRawText(null); }} />}
     </div>
   );
 }

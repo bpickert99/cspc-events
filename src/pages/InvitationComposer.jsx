@@ -165,8 +165,12 @@ export default function InvitationComposer() {
     setTemplate((t) => ({ ...t, [field]: val }));
   };
 
+  const [draftSaved, setDraftSaved] = useState(false);
+
   const saveTemplate = async () => {
     await setDoc(doc(db, "emailTemplates", id), { ...template, blocks: blocks || [], updatedAt: serverTimestamp() });
+    setDraftSaved(true);
+    setTimeout(() => setDraftSaved(false), 2500);
   };
 
   const uploadAttachment = async (e) => {
@@ -208,7 +212,7 @@ export default function InvitationComposer() {
           .replace(/{{eventLocation}}/g, event?.location || "")
           .replace(/{{rsvpLink}}/g, `${baseUrl}#/rsvp/${guest.rsvpToken}`);
       };
-      return `<div>${blocksToHtml(blocks, resolver, event)}</div>`;
+      return `<div>${blocksToHtml(blocks, resolver, event, guest.invitedParts || [])}</div>`;
     }
     return resolveMerge(template.body, guest, event, baseUrl, template.buttonText);
   };
@@ -406,7 +410,10 @@ export default function InvitationComposer() {
                 <button className="btn btn-secondary" onClick={sendPreview} disabled={sendingPreview || !previewGuest}>
                   {sendingPreview ? "Sending..." : `Send preview to ${user?.email || "me"}`}
                 </button>
-                <button className="btn btn-ghost" onClick={saveTemplate}>Save Draft</button>
+                <button className="btn btn-ghost" onClick={saveTemplate}
+                  style={{ color: draftSaved ? "var(--green)" : undefined, transition: "color 0.3s" }}>
+                  {draftSaved ? "Saved ✓" : "Save Draft"}
+                </button>
                 {previewResult && <span style={{ fontSize: "0.8125rem", color: previewResult.ok ? "var(--green)" : "var(--red)" }}>{previewResult.ok ? `✓ Preview sent to ${previewResult.email}` : `Error: ${previewResult.error}`}</span>}
               </div>
             </>
@@ -550,7 +557,10 @@ export default function InvitationComposer() {
                 <button className="btn btn-primary btn-lg" onClick={sendAll} disabled={sending || targets.length === 0}>
                   {sending ? "Sending..." : `Send to ${targets.length} Guest${targets.length !== 1 ? "s" : ""} Now`}
                 </button>
-                <button className="btn btn-secondary" onClick={saveTemplate}>Save Draft</button>
+                <button className="btn btn-secondary" onClick={saveTemplate}
+                  style={{ background: draftSaved ? "var(--green)" : undefined, color: draftSaved ? "white" : undefined, transition: "all 0.3s" }}>
+                  {draftSaved ? "Saved ✓" : "Save Draft"}
+                </button>
                 <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>
                   From: <strong>{previewFromName}</strong>
                 </span>

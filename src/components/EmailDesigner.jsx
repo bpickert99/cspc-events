@@ -4,6 +4,18 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import { v4 as uuid } from "uuid";
 
+// ─── Font options ──────────────────────────────────────────────────────────────
+const FONT_OPTIONS = [
+  { label: "Default (System)", value: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" },
+  { label: "Georgia (Serif)", value: "Georgia,'Times New Roman',serif" },
+  { label: "Garamond", value: "Garamond,'Times New Roman',serif" },
+  { label: "Palatino", value: "'Palatino Linotype',Palatino,serif" },
+  { label: "Arial", value: "Arial,Helvetica,sans-serif" },
+  { label: "Verdana", value: "Verdana,Geneva,sans-serif" },
+  { label: "Trebuchet MS", value: "'Trebuchet MS',Helvetica,sans-serif" },
+  { label: "Courier (Monospace)", value: "'Courier New',Courier,monospace" },
+];
+
 // ─── Block palette ─────────────────────────────────────────────────────────────
 const BLOCK_PALETTE = [
   { type: "text",    icon: "¶",  label: "Text" },
@@ -19,19 +31,20 @@ const BLOCK_PALETTE = [
 ];
 
 const DEFAULT_BLOCK = {
-  text:    { content: "Your text here.", fontSize: 15, color: "#1A202C", align: "left" },
-  heading: { content: "Section Heading", fontSize: 22, color: "#0F1A45", align: "center" },
-  image:   { src: "", alt: "", link: "", width: "100%", align: "center" },
-  button:  { label: "RSVP Now", url: "{{rsvpLink}}", bgColor: "#1B2B6B", textColor: "#FFFFFF", align: "center", borderRadius: 8, fontSize: 15 },
+  text:    { content: "Your text here.", fontSize: 15, color: "#1A202C", align: "left", fontFamily: FONT_OPTIONS[0].value, forParts: [] },
+  heading: { content: "Section Heading", fontSize: 22, color: "#0F1A45", align: "center", fontFamily: FONT_OPTIONS[0].value, forParts: [] },
+  image:   { src: "", alt: "", link: "", width: "100%", align: "center", forParts: [] },
+  button:  { label: "RSVP Now", url: "{{rsvpLink}}", bgColor: "#1B2B6B", textColor: "#FFFFFF", align: "center", borderRadius: 8, fontSize: 15, forParts: [] },
   columns: {
     left:  { type: "text", content: "Left column text.", fontSize: 14, color: "#1A202C", align: "left", src: "", alt: "", link: "", label: "Learn More", url: "{{rsvpLink}}", bgColor: "#1B2B6B", textColor: "#FFFFFF", borderRadius: 6 },
     right: { type: "text", content: "Right column text.", fontSize: 14, color: "#1A202C", align: "left", src: "", alt: "", link: "", label: "Learn More", url: "{{rsvpLink}}", bgColor: "#1B2B6B", textColor: "#FFFFFF", borderRadius: 6 },
+    forParts: [],
   },
-  callout: { content: "Important information for your guests.", bgColor: "#EFF6FF", borderColor: "#1B2B6B", textColor: "#0F1A45", fontSize: 14, icon: "ℹ️" },
-  list:    { items: ["First item", "Second item", "Third item"], style: "bullet", fontSize: 14, color: "#1A202C" },
-  event:   { showDate: true, showLocation: true, showParts: true, bgColor: "#F8FAFF", borderColor: "#1B2B6B" },
-  divider: { color: "#E4E8F0", thickness: 1, marginTop: 12, marginBottom: 12 },
-  spacer:  { height: 24 },
+  callout: { content: "Important information for your guests.", bgColor: "#EFF6FF", borderColor: "#1B2B6B", textColor: "#0F1A45", fontSize: 14, icon: "ℹ️", forParts: [] },
+  list:    { items: ["First item", "Second item", "Third item"], style: "bullet", fontSize: 14, color: "#1A202C", forParts: [] },
+  event:   { showDate: true, showLocation: true, showParts: true, bgColor: "#F8FAFF", borderColor: "#1B2B6B", forParts: [] },
+  divider: { color: "#E4E8F0", thickness: 1, marginTop: 12, marginBottom: 12, forParts: [] },
+  spacer:  { height: 24, forParts: [] },
 };
 
 export function createBlock(type) {
@@ -39,9 +52,16 @@ export function createBlock(type) {
 }
 
 // ─── HTML generation ────────────────────────────────────────────────────────────
-export function blocksToHtml(blocks, resolveToken, event) {
+export function blocksToHtml(blocks, resolveToken, event, guestInvitedParts) {
   const r = resolveToken || ((s) => s);
-  return blocks.map((b) => blockToHtml(b, r, event)).join("\n");
+  return blocks
+    .filter((b) => {
+      if (!b.forParts || b.forParts.length === 0) return true;
+      if (!guestInvitedParts || guestInvitedParts.length === 0) return true;
+      return b.forParts.some((pid) => guestInvitedParts.includes(pid));
+    })
+    .map((b) => blockToHtml(b, r, event, guestInvitedParts))
+    .join("\n");
 }
 
 function colHtml(col, r) {
@@ -57,12 +77,15 @@ function colHtml(col, r) {
   }
 }
 
-function blockToHtml(b, r, event) {
+function blockToHtml(b, r, event, guestInvitedParts) {
   switch (b.type) {
     case "text":
     case "heading": {
       const tag = b.type === "heading" ? "h2" : "p";
-      return `<${tag} style="font-size:${b.fontSize}px;color:${b.color};text-align:${b.align};margin:0 0 8px;padding:0;line-height:1.6;">${r(b.content || "")}</${tag}>`;
+      const ff = b.fontFamily || FONT_OPTIONS[0].value;
+      // Convert newlines to <br> for proper indentation/whitespace in email
+      const htmlContent = (b.content || "").replace(/\n/g, "<br>");
+      return `<${tag} style="font-size:${b.fontSize}px;color:${b.color};text-align:${b.align};font-family:${ff};margin:0 0 8px;padding:0;line-height:1.7;">${r(htmlContent)}</${tag}>`;
     }
     case "image": {
       if (!b.src) return `<div style="text-align:${b.align};padding:8px 0;color:#94A0B8;font-size:13px;">[Image — add URL in settings]</div>`;
@@ -93,7 +116,7 @@ function blockToHtml(b, r, event) {
 </tr></table>`;
     case "callout":
       return `<div style="background:${b.bgColor || "#EFF6FF"};border-left:4px solid ${b.borderColor || "#1B2B6B"};padding:14px 16px;border-radius:6px;margin:8px 0;">
-  <div style="font-size:${b.fontSize || 14}px;color:${b.textColor || "#0F1A45"};line-height:1.6;">${b.icon ? `${b.icon} ` : ""}${r(b.content || "")}</div>
+  <div style="font-size:${b.fontSize || 14}px;color:${b.textColor || "#0F1A45"};line-height:1.6;">${b.icon ? `${b.icon} ` : ""}${r((b.content || "").replace(/\n/g, "<br>"))}</div>
 </div>`;
     case "list": {
       const tag = b.style === "numbered" ? "ol" : "ul";
@@ -103,7 +126,12 @@ function blockToHtml(b, r, event) {
     case "event": {
       if (!event) return "";
       const dateStr = event.date ? (event.date.toDate ? event.date.toDate() : new Date(event.date)).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }) : "";
-      const parts = (event.parts || []).filter((p) => p.name);
+      // Only show parts the guest is invited to
+      const parts = (event.parts || []).filter((p) => {
+        if (!p.name) return false;
+        if (!guestInvitedParts || guestInvitedParts.length === 0) return true;
+        return guestInvitedParts.includes(p.id);
+      });
       return `<div style="background:${b.bgColor || "#F8FAFF"};border:1.5px solid ${b.borderColor || "#1B2B6B"};border-radius:8px;padding:16px 20px;margin:8px 0;">
   <div style="font-weight:700;font-size:16px;color:#0F1A45;margin-bottom:8px;">${event.name || ""}</div>
   ${b.showDate && dateStr ? `<div style="font-size:14px;color:#1A202C;margin-bottom:4px;">📅 ${dateStr}</div>` : ""}
@@ -238,9 +266,9 @@ function BlockContent({ block, selected, onUpdate, event }) {
         );
       }
       return (
-        <div style={{ fontSize: Math.min(block.fontSize ?? 15, 20), color: block.color, textAlign: block.align, lineHeight: 1.5, padding: "3px 0", wordBreak: "break-word" }}>
+        <div style={{ fontSize: Math.min(block.fontSize ?? 15, 20), color: block.color, textAlign: block.align, lineHeight: 1.7, padding: "3px 0", wordBreak: "break-word", fontFamily: block.fontFamily || "inherit", whiteSpace: "pre-wrap" }}>
           {block.content
-            ? <span dangerouslySetInnerHTML={{ __html: block.content }} />
+            ? <span dangerouslySetInnerHTML={{ __html: (block.content || "").replace(/\n/g, "<br>") }} />
             : <span style={{ color: "var(--gray-300)", fontStyle: "italic" }}>Click to edit {block.type}...</span>}
         </div>
       );
@@ -396,12 +424,19 @@ function BlockContent({ block, selected, onUpdate, event }) {
 function SortableBlock({ block, selected, onSelect, onDelete, onUpdate, event }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: block.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
+  const hasPartFilter = block.forParts && block.forParts.length > 0;
+  const partNames = hasPartFilter && event ? block.forParts.map((pid) => (event.parts || []).find((p) => p.id === pid)?.name).filter(Boolean).join(", ") : "";
   return (
     <div ref={setNodeRef} style={style}
       onClick={(e) => { e.stopPropagation(); onSelect(block.id); }}
       className={selected ? "designer-block selected" : "designer-block"}>
       <div className="block-drag-handle" {...attributes} {...listeners} title="Drag to reorder">⠿</div>
       <div className="block-preview">
+        {hasPartFilter && (
+          <div style={{ fontSize: "0.6rem", fontWeight: 700, color: "var(--navy)", background: "var(--navy-xlight)", borderRadius: 4, padding: "1px 6px", marginBottom: 4, display: "inline-block" }}>
+            👁 {partNames} only
+          </div>
+        )}
         <BlockContent block={block} selected={selected} onUpdate={onUpdate} event={event} />
       </div>
       <button className="block-delete" onClick={(e) => { e.stopPropagation(); onDelete(block.id); }} title="Remove">✕</button>
@@ -462,6 +497,31 @@ function BlockSettings({ block, onChange, event }) {
   );
 
   const title = (t) => <div style={{ fontWeight: 700, color: "var(--gray-700)", marginBottom: "0.875rem", fontSize: "0.875rem", borderBottom: "1px solid var(--gray-100)", paddingBottom: "0.5rem" }}>{t}</div>;
+
+  const forPartsInput = (blk, setter, ev) => {
+    if (!ev || (ev.parts || []).length <= 1) return null;
+    return (
+      <div style={{ marginTop: "0.75rem", paddingTop: "0.75rem", borderTop: "1px solid var(--gray-100)" }}>
+        <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--gray-500)", display: "block", marginBottom: "0.375rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Show only to guests invited to
+        </label>
+        <div style={{ fontSize: "0.75rem", color: "var(--gray-400)", marginBottom: "0.375rem" }}>Leave all unchecked to show to everyone.</div>
+        {ev.parts.map((p) => (
+          <label key={p.id} className="checkbox-label" style={{ fontSize: "0.8rem", marginBottom: "0.25rem" }}>
+            <input type="checkbox"
+              checked={(blk.forParts || []).includes(p.id)}
+              onChange={() => setter("forParts", (blk.forParts || []).includes(p.id) ? (blk.forParts || []).filter((x) => x !== p.id) : [...(blk.forParts || []), p.id])} />
+            {p.name}
+          </label>
+        ))}
+        {(blk.forParts || []).length > 0 && (
+          <div style={{ marginTop: "0.375rem", padding: "0.3rem 0.5rem", background: "var(--navy-xlight)", borderRadius: 5, fontSize: "0.7rem", color: "var(--navy)", fontWeight: 600 }}>
+            ✓ Only shown to: {(blk.forParts || []).map((pid) => ev.parts.find((p) => p.id === pid)?.name).filter(Boolean).join(", ")}
+          </div>
+        )}
+      </div>
+    );
+  };
   const inlineNote = <div style={{ background: "var(--navy-xlight)", border: "1px solid var(--navy-light)", borderRadius: 5, padding: "0.4rem 0.625rem", fontSize: "0.72rem", color: "var(--navy)", marginBottom: "0.75rem" }}>✏️ Type directly on the canvas</div>;
 
   switch (block.type) {
@@ -474,6 +534,13 @@ function BlockSettings({ block, onChange, event }) {
           {numInput("Font Size", "fontSize", 10, 48, block.type === "heading" ? 22 : 15)}
           {colorInput("Color", "color")}
           {alignBtns()}
+          <div style={{ marginBottom: "0.75rem" }}>
+            <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--gray-500)", display: "block", marginBottom: "0.2rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>Font</label>
+            <select className="form-select" style={{ fontSize: "0.8rem" }} value={block.fontFamily || FONT_OPTIONS[0].value} onChange={(e) => set("fontFamily", e.target.value)}>
+              {FONT_OPTIONS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+          {forPartsInput(block, set, event)}
         </div>
       );
     case "image":
@@ -485,6 +552,7 @@ function BlockSettings({ block, onChange, event }) {
           {textInput("Link URL", "link", "https://... or {{rsvpLink}}")}
           {textInput("Width", "width", "100% or 300px")}
           {alignBtns()}
+          {forPartsInput(block, set, event)}
         </div>
       );
     case "button":
@@ -502,6 +570,7 @@ function BlockSettings({ block, onChange, event }) {
           {numInput("Font Size", "fontSize", 10, 24, 15)}
           {numInput("Border Radius", "borderRadius", 0, 30, 8)}
           {alignBtns()}
+          {forPartsInput(block, set, event)}
         </div>
       );
     case "columns":
@@ -511,6 +580,7 @@ function BlockSettings({ block, onChange, event }) {
           <div style={{ fontSize: "0.8rem", color: "var(--gray-500)", marginBottom: "0.75rem", lineHeight: 1.5 }}>
             Each column can contain <strong>Text</strong>, an <strong>Image</strong>, or a <strong>Button</strong>. Select the column type directly on the canvas when the block is selected.
           </div>
+          {forPartsInput(block, set, event)}
         </div>
       );
     case "callout":
@@ -526,6 +596,7 @@ function BlockSettings({ block, onChange, event }) {
           {colorInput("Border Color", "borderColor")}
           {colorInput("Text Color", "textColor")}
           {numInput("Font Size", "fontSize", 10, 24, 14)}
+          {forPartsInput(block, set, event)}
         </div>
       );
     case "list":
@@ -535,13 +606,14 @@ function BlockSettings({ block, onChange, event }) {
           <div style={{ fontSize: "0.8rem", color: "var(--gray-500)", marginBottom: "0.75rem" }}>Edit list items directly on the canvas.</div>
           {colorInput("Text Color", "color")}
           {numInput("Font Size", "fontSize", 10, 24, 14)}
+          {forPartsInput(block, set, event)}
         </div>
       );
     case "event":
       return (
         <div style={{ padding: "0.875rem" }}>
           {title("Event Details")}
-          <div style={{ fontSize: "0.8rem", color: "var(--gray-500)", marginBottom: "0.75rem" }}>Auto-populated from your event settings.</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--gray-500)", marginBottom: "0.75rem" }}>Auto-populated from your event. Only shows parts the recipient is invited to.</div>
           {["showDate", "showLocation", "showParts"].map((field) => (
             <label key={field} className="checkbox-label" style={{ marginBottom: "0.5rem", fontSize: "0.875rem" }}>
               <input type="checkbox" checked={block[field] !== false} onChange={(e) => set(field, e.target.checked)} />
@@ -550,6 +622,7 @@ function BlockSettings({ block, onChange, event }) {
           ))}
           {colorInput("Background", "bgColor")}
           {colorInput("Border Color", "borderColor")}
+          {forPartsInput(block, set, event)}
         </div>
       );
     case "divider":
