@@ -276,8 +276,7 @@ export default function EventDetail() {
       {/* ─── Stats ───────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
         <Stat label="Invited" value={total} onClick={() => setActiveFilter("all")} active={activeFilter === "all"} />
-        <Stat label="Attending" value={attending} sub={plusOnesAttending > 0 ? `+${plusOnesAttending} plus one${plusOnesAttending !== 1 ? "s" : ""}` : undefined} color="var(--green)" onClick={() => setActiveFilter("attending")} active={activeFilter === "attending"} />
-        <Stat label="Total Seats" value={totalHeadcount} color="var(--green)" sub="guests + plus ones" />
+        <Stat label="Attending" value={attending} sub={plusOnesAttending > 0 ? `+ ${plusOnesAttending} plus one${plusOnesAttending !== 1 ? "s" : ""}` : undefined} color="var(--green)" onClick={() => setActiveFilter("attending")} active={activeFilter === "attending"} />
         <Stat label="Pending" value={pending} color="var(--amber)" onClick={() => setActiveFilter("pending")} active={activeFilter === "pending"} />
         <Stat label="Declined" value={declined} color="var(--red)" onClick={() => setActiveFilter("declined")} active={activeFilter === "declined"} />
         <Stat label="Response Rate" value={`${responseRate}%`} sub={`${responded} of ${sent} emailed`} color="var(--navy)" />
@@ -285,25 +284,6 @@ export default function EventDetail() {
           <Stat label="Follow-Up Needed" value={needsFollowUp.length} sub="sent 3+ days ago" color="var(--amber)" onClick={() => setActiveFilter("followup")} active={activeFilter === "followup"} />
         )}
       </div>
-
-      {/* ─── Response rate bar ────────────────────────────────────────────── */}
-      {sent > 0 && (
-        <div style={{ marginBottom: "1.5rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "var(--gray-500)", marginBottom: "0.375rem" }}>
-            <span>{responded} responded of {sent} emailed · {opened} opened</span>
-            <span style={{ fontWeight: 700, color: "var(--navy)" }}>{responseRate}%</span>
-          </div>
-          <div style={{ height: 8, background: "var(--gray-100)", borderRadius: 99, overflow: "hidden", display: "flex" }}>
-            <div style={{ width: `${(attending / Math.max(sent, 1)) * 100}%`, background: "var(--green)", transition: "width 0.4s" }} />
-            <div style={{ width: `${(declined / Math.max(sent, 1)) * 100}%`, background: "var(--red)", transition: "width 0.4s" }} />
-          </div>
-          <div style={{ display: "flex", gap: "1rem", marginTop: "0.375rem", fontSize: "0.75rem", color: "var(--gray-400)" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><span style={{ width: 8, height: 8, borderRadius: 99, background: "var(--green)", display: "inline-block" }} />Attending</span>
-            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><span style={{ width: 8, height: 8, borderRadius: 99, background: "var(--red)", display: "inline-block" }} />Declined</span>
-            <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><span style={{ width: 8, height: 8, borderRadius: 99, background: "var(--gray-100)", border: "1px solid var(--gray-200)", display: "inline-block" }} />Pending</span>
-          </div>
-        </div>
-      )}
 
       {/* ─── Per-part breakdown ───────────────────────────────────────────── */}
       {multiPart && (

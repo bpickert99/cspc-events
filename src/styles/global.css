@@ -616,3 +616,11 @@ input, textarea, select { font-family: inherit; font-size: 0.9375rem; }
 }
 .designer-block:hover .block-delete { opacity: 1; }
 .block-delete:hover { color: var(--red); background: var(--red-light); }
+
+/* ─── ContentEditable placeholder ───────────────────────────────────────────── */
+.designer-editable:empty:before {
+  content: attr(data-placeholder);
+  color: var(--gray-300);
+  font-style: italic;
+  pointer-events: none;
+}
