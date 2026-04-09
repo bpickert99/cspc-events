@@ -198,6 +198,8 @@ function GuestModal({ event, guest, onClose, onSave }) {
     rsvpParts: guest?.rsvpParts || [],
     plusOneRsvpStatus: guest?.plusOneRsvpStatus || "pending",
     plusOneRsvpName: guest?.plusOneRsvpName || "",
+    dietary: guest?.rsvpData?.["Dietary restrictions"] || guest?.rsvpData?.["dietary restrictions"] || "",
+    plusOneDietary: guest?.rsvpData?.["Plus one dietary restrictions"] || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (f) => (e) => setForm((s) => ({ ...s, [f]: e.target.value }));
@@ -319,6 +321,19 @@ function GuestModal({ event, guest, onClose, onSave }) {
               <label>Internal Notes</label>
               <textarea className="form-textarea" value={form.notes} onChange={set("notes")} placeholder="Any relevant notes..." style={{ minHeight: 70 }} />
             </div>
+
+            <div className="divider" />
+            <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", marginBottom: "0.75rem", textTransform: "uppercase", letterSpacing: "0.06em" }}>Dietary & Accessibility</div>
+            <div className="form-group">
+              <label>Guest Dietary Restrictions</label>
+              <input className="form-input" value={form.dietary} onChange={set("dietary")} placeholder="e.g. Vegetarian, Nut allergy, Kosher" />
+            </div>
+            {hasPlus && (
+              <div className="form-group">
+                <label>Plus One Dietary Restrictions</label>
+                <input className="form-input" value={form.plusOneDietary} onChange={set("plusOneDietary")} placeholder="Plus one's dietary needs" />
+              </div>
+            )}
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -442,11 +457,20 @@ export default function GuestManager() {
   // ─── Guest CRUD ───────────────────────────────────────────────────────────
   const saveGuest = async (form, guestId) => {
     const limit = parseInt(form.plusOneLimit, 10);
-    const data = { ...form, plusOneEligible: limit !== 0, plusOneLimit: limit, plusOneName: form.staffPlusOneNames?.[0] || "", updatedAt: serverTimestamp() };
+    // Merge dietary edits into rsvpData
+    const existingGuest = guestId ? guests.find((g) => g.id === guestId) : null;
+    const baseRsvpData = existingGuest?.rsvpData || {};
+    const rsvpData = {
+      ...baseRsvpData,
+      ...(form.dietary !== undefined ? { "Dietary restrictions": form.dietary } : {}),
+      ...(form.plusOneDietary !== undefined ? { "Plus one dietary restrictions": form.plusOneDietary } : {}),
+    };
+    const { dietary, plusOneDietary, ...rest } = form;
+    const data = { ...rest, plusOneEligible: limit !== 0, plusOneLimit: limit, plusOneName: form.staffPlusOneNames?.[0] || "", rsvpData, updatedAt: serverTimestamp() };
     if (guestId) {
       await updateDoc(doc(db, "guests", guestId), data);
     } else {
-      await addDoc(collection(db, "guests"), { ...data, eventId: id, rsvpToken: uuid(), rsvpStatus: "pending", rsvpParts: [], rsvpData: {}, emailSent: false, emailOpened: false, emailBounced: false, createdAt: serverTimestamp() });
+      await addDoc(collection(db, "guests"), { ...data, eventId: id, rsvpToken: uuid(), rsvpStatus: "pending", rsvpParts: [], emailSent: false, emailOpened: false, emailBounced: false, createdAt: serverTimestamp() });
     }
     setModal(null);
   };
@@ -651,11 +675,17 @@ export default function GuestManager() {
               {sorted.map((g) => {
                 const limit = g.plusOneLimit ?? (g.plusOneEligible ? 1 : 0);
                 const hasQuickTag = quickTagMode && (g.tags || []).includes(quickTagMode);
-                const dietary = g.rsvpData?.["Dietary restrictions"] || "";
-                const plusOneNames = [];
-                if (g.plusOneRsvpName) plusOneNames.push({ name: g.plusOneRsvpName, source: "rsvp" });
-                else if (g.staffPlusOneNames?.filter(Boolean).length) g.staffPlusOneNames.filter(Boolean).forEach((n) => plusOneNames.push({ name: n, source: "staff" }));
-                const showPlusOneRow = limit !== 0 && (g.plusOneRsvpStatus === "yes" || plusOneNames.length > 0);
+                // Normalize dietary — check all common field names
+                const dietary = g.rsvpData
+                  ? Object.entries(g.rsvpData).find(([k]) => k.toLowerCase().includes("dietary") && !k.toLowerCase().includes("plus"))?.[1] || ""
+                  : "";
+                const plusOneDietary = g.rsvpData
+                  ? Object.entries(g.rsvpData).find(([k]) => k.toLowerCase().includes("dietary") && k.toLowerCase().includes("plus"))?.[1] || ""
+                  : "";
+                // Plus-one display
+                const plusOneName = g.plusOneRsvpName || g.staffPlusOneNames?.filter(Boolean)[0] || "";
+                const plusOneSource = g.plusOneRsvpName ? "rsvp" : "staff";
+                const showPlusOneRow = limit !== 0;
                 const isSelected = selected.has(g.id);
 
                 return (
@@ -701,36 +731,31 @@ export default function GuestManager() {
                         </div>
                       </td>
                     </tr>
-                    {showPlusOneRow && plusOneNames.map((po, i) => (
-                      <tr key={`${g.id}_po_${i}`} style={{ background: "var(--gold-light)" }}>
+                    {showPlusOneRow && (
+                      <tr key={`${g.id}_plus`} style={{ background: "#FFFBEB", borderLeft: "3px solid var(--gold)" }}>
                         <td />
-                        <td style={{ paddingLeft: "2.5rem" }}>
+                        <td style={{ paddingLeft: "2rem" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            <span style={{ color: "var(--gold-dark)", fontSize: "0.75rem", fontWeight: 700 }}>└ ＋1</span>
-                            <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--gray-700)" }}>{po.name}</span>
-                            {po.source === "staff" && <span style={{ fontSize: "0.65rem", color: "var(--gray-400)", fontStyle: "italic" }}>staff-entered</span>}
+                            <span style={{ color: "var(--gold-dark)", fontSize: "0.7rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em" }}>＋1</span>
+                            {plusOneName
+                              ? <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--gray-700)" }}>
+                                  {plusOneName}
+                                  {plusOneSource === "staff" && g.rsvpStatus !== "yes" && <span style={{ fontSize: "0.65rem", color: "var(--gray-400)", fontStyle: "italic", marginLeft: 4 }}>staff-entered</span>}
+                                </span>
+                              : <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)", fontStyle: "italic" }}>
+                                  {g.plusOneRsvpStatus === "no" ? "Not bringing a guest" : "Name not provided"}
+                                </span>}
                           </div>
-                          {g.rsvpData && Object.entries(g.rsvpData).filter(([k]) => k.toLowerCase().includes("dietary") || k.toLowerCase().includes("allerg") || k.toLowerCase().includes("plus one")).map(([k, v]) => (
-                            v ? <div key={k} style={{ fontSize: "0.7rem", color: "var(--amber)", marginTop: "0.125rem", paddingLeft: "2rem" }}>🍽 {v}</div> : null
-                          ))}
+                          {plusOneDietary && <div style={{ fontSize: "0.7rem", color: "var(--amber)", marginTop: "0.125rem", paddingLeft: "1.5rem" }}>🍽 {plusOneDietary}</div>}
                         </td>
-                        <td colSpan={multiPart ? 2 : 1} />
-                        <td><span style={{ fontSize: "0.75rem", color: "var(--gold-dark)", fontWeight: 600 }}>+1 of {g.firstName} {g.lastName}</span></td>
+                        <td style={{ fontSize: "0.8rem", color: "var(--gray-400)" }} colSpan={multiPart ? 2 : 1}>of {g.firstName} {g.lastName}</td>
                         <td colSpan={eventTags.length > 0 ? 2 : 1} />
-                        <td><span className={`badge ${g.plusOneRsvpStatus === "yes" ? "badge-yes" : g.plusOneRsvpStatus === "no" ? "badge-no" : "badge-pending"}`}>{g.plusOneRsvpStatus === "yes" ? "Attending" : g.plusOneRsvpStatus === "no" ? "Declined" : "Pending"}</span></td>
-                        <td />
-                      </tr>
-                    ))}
-                    {limit !== 0 && !showPlusOneRow && (
-                      <tr key={`${g.id}_po_placeholder`} style={{ background: "var(--gray-50)" }}>
-                        <td />
-                        <td style={{ paddingLeft: "2.5rem" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            <span style={{ color: "var(--gray-300)", fontSize: "0.75rem", fontWeight: 700 }}>└ ＋1</span>
-                            <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)", fontStyle: "italic" }}>{g.plusOneRsvpStatus === "no" ? "Not bringing a guest" : "Name not yet provided"}</span>
-                          </div>
+                        <td>
+                          <span className={`badge ${g.plusOneRsvpStatus === "yes" ? "badge-yes" : g.plusOneRsvpStatus === "no" ? "badge-no" : "badge-pending"}`} style={{ fontSize: "0.7rem" }}>
+                            {g.plusOneRsvpStatus === "yes" ? "Attending" : g.plusOneRsvpStatus === "no" ? "Declined" : "Pending"}
+                          </span>
                         </td>
-                        <td colSpan={99} />
+                        <td />
                       </tr>
                     )}
                   </>

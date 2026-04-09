@@ -740,8 +740,8 @@ export default function EmailDesigner({ blocks, onChange, subject, onSubjectChan
       {/* Canvas */}
       <div style={{ background: "var(--white)", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-lg)", overflow: "hidden", display: "flex", flexDirection: "column" }}
         onClick={() => setSelectedId(null)}>
-        <div style={{ background: "#0F1A45", padding: "13px 20px", textAlign: "center", flexShrink: 0 }}>
-          <img src="https://bpickert99.github.io/cspc-events/cspc-logo.png" alt="CSPC" style={{ height: 28, filter: "brightness(0) invert(1)", display: "inline-block" }} />
+        <div style={{ background: "#FFFFFF", borderBottom: "3px solid #1B2B6B", padding: "13px 20px", textAlign: "center", flexShrink: 0 }}>
+          <img src="https://bpickert99.github.io/cspc-events/cspc-logo.png" alt="CSPC" style={{ height: 34, display: "inline-block" }} />
         </div>
         <div id="designer-canvas" style={{ flex: 1, overflowY: "auto", padding: "1rem 1.5rem", minHeight: 200 }}>
           {blocks.length === 0 ? (

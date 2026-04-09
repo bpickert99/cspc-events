@@ -64,9 +64,9 @@ function UnassignedDropZone({ children }) {
 export default function SeatingManager() {
   const { id } = useParams();
   const [event, setEvent]   = useState(null);
-  const [allGuests, setAllGuests] = useState([]); // full enriched list
-  const [guests, setGuests] = useState([]);        // filtered by selected part
-  const [selectedPart, setSelectedPart] = useState("all");
+  const [allGuests, setAllGuests] = useState([]);
+  const [guests, setGuests] = useState([]);
+  const [selectedPart, setSelectedPart] = useState(null); // null until loaded
   const [tables, setTables] = useState([]);
   const [assignments, setAssignments] = useState({});
   const [loading, setLoading]  = useState(true);
@@ -79,22 +79,26 @@ export default function SeatingManager() {
     (async () => {
       const evSnap = await getDoc(doc(db, "events", id));
       if (!evSnap.exists()) return;
-      setEvent({ id: evSnap.id, ...evSnap.data() });
+      const ev = { id: evSnap.id, ...evSnap.data() };
+      setEvent(ev);
+      // Default to first seating part, or first part overall
+      const seatingPartIds = ev.seatingParts?.length ? ev.seatingParts : (ev.parts || []).map((p) => p.id);
+      if (seatingPartIds.length > 0) setSelectedPart(seatingPartIds[0]);
 
       const guestSnap = await getDocs(query(collection(db, "guests"), where("eventId", "==", id)));
       const rawGuests = guestSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      // Build enriched list — ONLY guests who RSVPed yes
       const enriched = [];
       rawGuests.forEach((g) => {
-        if (g.rsvpStatus !== "yes") return; // only confirmed attendees
+        if (g.rsvpStatus !== "yes") return;
+        const gDietary = g.rsvpData ? Object.entries(g.rsvpData).find(([k]) => k.toLowerCase().includes("dietary") && !k.toLowerCase().includes("plus"))?.[1] || "" : "";
         enriched.push({
           id: g.id,
           displayName: `${g.title ? g.title + " " : ""}${g.firstName} ${g.lastName}`.trim(),
           isPlusOne: false,
           primaryGuestId: null,
           primaryName: null,
-          dietary: g.rsvpData?.["Dietary restrictions"] || "",
+          dietary: gDietary,
           invitedParts: g.rsvpParts?.length ? g.rsvpParts : (g.invitedParts || []),
         });
         const plusName = g.plusOneRsvpName || (g.staffPlusOneNames?.filter(Boolean)[0] || "");
@@ -143,7 +147,7 @@ export default function SeatingManager() {
 
   // Filter guests by selected part
   useEffect(() => {
-    if (selectedPart === "all") {
+    if (!selectedPart) {
       setGuests(allGuests);
     } else {
       setGuests(allGuests.filter((g) => (g.invitedParts || []).includes(selectedPart)));
@@ -300,17 +304,21 @@ export default function SeatingManager() {
         <span style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
           <span style={{ width: 12, height: 12, borderRadius: 2, background: "var(--gold)", display: "inline-block" }} /> Plus one
         </span>
-        {(event.parts || []).length > 1 && (
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span style={{ fontWeight: 600, color: "var(--gray-600)" }}>Seating for:</span>
-            <div style={{ display: "flex", gap: "0.375rem" }}>
-              <button className={`btn btn-sm ${selectedPart === "all" ? "btn-primary" : "btn-secondary"}`} onClick={() => setSelectedPart("all")}>All parts</button>
-              {event.parts.map((p) => (
-                <button key={p.id} className={`btn btn-sm ${selectedPart === p.id ? "btn-primary" : "btn-secondary"}`} onClick={() => setSelectedPart(p.id)}>{p.name}</button>
-              ))}
+        {(() => {
+          const seatingPartIds = event.seatingParts?.length ? event.seatingParts : (event.parts || []).map((p) => p.id);
+          const seatingParts = (event.parts || []).filter((p) => seatingPartIds.includes(p.id));
+          if (seatingParts.length <= 1) return null;
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span style={{ fontWeight: 600, color: "var(--gray-600)", fontSize: "0.875rem" }}>Seating for:</span>
+              <div style={{ display: "flex", gap: "0.375rem" }}>
+                {seatingParts.map((p) => (
+                  <button key={p.id} className={`btn btn-sm ${selectedPart === p.id ? "btn-primary" : "btn-secondary"}`} onClick={() => setSelectedPart(p.id)}>{p.name}</button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         <span style={{ marginLeft: "auto" }}>
           {allGuests.length} confirmed · {unassigned.length} unassigned · {Object.keys(assignments).length} seated
           {allGuests.length === 0 && <span style={{ color: "var(--amber)", marginLeft: "0.5rem" }}>— No confirmed RSVPs yet</span>}

@@ -160,16 +160,24 @@ export default function EventDetail() {
   if (loading) return <div className="loading">Loading...</div>;
   if (!event) return <div className="error-msg">Event not found.</div>;
 
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+  const getDietary = (g) => g.rsvpData
+    ? Object.entries(g.rsvpData).find(([k]) => k.toLowerCase().includes("dietary") && !k.toLowerCase().includes("plus"))?.[1] || ""
+    : "";
+  const getPlusOneDietary = (g) => g.rsvpData
+    ? Object.entries(g.rsvpData).find(([k]) => k.toLowerCase().includes("dietary") && k.toLowerCase().includes("plus"))?.[1] || ""
+    : "";
+
   // ─── Stats ─────────────────────────────────────────────────────────────────
   const total = guests.length;
-  const attending = guests.filter((g) => g.rsvpStatus === "yes").length;
+  const primaryAttending = guests.filter((g) => g.rsvpStatus === "yes").length;
   const plusOnesAttending = guests.filter((g) => g.rsvpStatus === "yes" && g.plusOneRsvpStatus === "yes").length;
-  const totalHeadcount = attending + plusOnesAttending;
+  // Attending = real headcount (primary + confirmed plus ones)
+  const attending = primaryAttending + plusOnesAttending;
   const declined = guests.filter((g) => g.rsvpStatus === "no").length;
   const pending = guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length;
   const sent = guests.filter((g) => g.emailSent).length;
-  const opened = guests.filter((g) => g.emailOpened).length;
-  const responded = attending + declined;
+  const responded = primaryAttending + declined;
   const responseRate = sent > 0 ? Math.min(100, Math.round((responded / sent) * 100)) : 0;
   const needsFollowUp = guests.filter((g) => g.emailSent && (!g.rsvpStatus || g.rsvpStatus === "pending") && daysSince(g.emailSentAt) >= 3);
 
@@ -179,7 +187,7 @@ export default function EventDetail() {
   // ─── Part breakdown ─────────────────────────────────────────────────────────
   const partBreakdown = (event.parts || []).map((part) => {
     const inv = guests.filter((g) => (g.invitedParts || []).includes(part.id));
-    const att = guests.filter((g) => g.rsvpStatus === "yes" && (g.rsvpParts?.includes(part.id) ?? true));
+    const att = guests.filter((g) => g.rsvpStatus === "yes" && (g.rsvpParts?.includes(part.id) ?? (g.invitedParts || []).includes(part.id)));
     const plusOnes = att.filter((g) => g.plusOneRsvpStatus === "yes").length;
     return { part, invited: inv.length, attending: att.length, plusOnes, headcount: att.length + plusOnes };
   });
@@ -236,11 +244,8 @@ export default function EventDetail() {
     </button>
   );
 
-  // Dietary summary for all attending guests
-  const dietaryGuests = guests.filter((g) => g.rsvpStatus === "yes" && (
-    (g.rsvpData && Object.entries(g.rsvpData).some(([k, v]) => k.toLowerCase().includes("dietary") && v && v !== "None" && v !== "No" && v !== "N/A")) ||
-    (g.rsvpData && Object.entries(g.rsvpData).some(([k, v]) => k.toLowerCase().includes("allerg") && v && v !== "None"))
-  ));
+  // Dietary summary
+  const dietaryGuests = guests.filter((g) => g.rsvpStatus === "yes" && (getDietary(g) || getPlusOneDietary(g)));
 
   const isPast = event.date && (event.date.toDate ? event.date.toDate() : new Date(event.date)) < new Date();
 
@@ -276,7 +281,7 @@ export default function EventDetail() {
       {/* ─── Stats ───────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
         <Stat label="Invited" value={total} onClick={() => setActiveFilter("all")} active={activeFilter === "all"} />
-        <Stat label="Attending" value={attending} sub={plusOnesAttending > 0 ? `+ ${plusOnesAttending} plus one${plusOnesAttending !== 1 ? "s" : ""}` : undefined} color="var(--green)" onClick={() => setActiveFilter("attending")} active={activeFilter === "attending"} />
+        <Stat label="Attending" value={attending} sub={plusOnesAttending > 0 ? `${primaryAttending} guests + ${plusOnesAttending} plus one${plusOnesAttending !== 1 ? "s" : ""}` : `${primaryAttending} guests`} color="var(--green)" onClick={() => setActiveFilter("attending")} active={activeFilter === "attending"} />
         <Stat label="Pending" value={pending} color="var(--amber)" onClick={() => setActiveFilter("pending")} active={activeFilter === "pending"} />
         <Stat label="Declined" value={declined} color="var(--red)" onClick={() => setActiveFilter("declined")} active={activeFilter === "declined"} />
         <Stat label="Response Rate" value={`${responseRate}%`} sub={`${responded} of ${sent} emailed`} color="var(--navy)" />
@@ -288,16 +293,12 @@ export default function EventDetail() {
       {/* ─── Per-part breakdown ───────────────────────────────────────────── */}
       {multiPart && (
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
-          {partBreakdown.map(({ part, invited, attending, headcount }) => (
+          {partBreakdown.map(({ part, invited, attending, plusOnes, headcount }) => (
             <div key={part.id} style={{ flex: 1, minWidth: 160, background: "var(--white)", border: "1px solid var(--gray-100)", borderRadius: "var(--radius-lg)", padding: "0.875rem 1rem" }}>
               <div style={{ fontWeight: 700, color: "var(--navy)", marginBottom: "0.5rem", fontSize: "0.9375rem" }}>{part.name}</div>
               <div style={{ fontSize: "0.8rem", color: "var(--gray-500)", display: "flex", flexDirection: "column", gap: "0.2rem" }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}><span>Invited</span><strong style={{ color: "var(--gray-700)" }}>{invited}</strong></div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Attending</span><strong style={{ color: "var(--green)" }}>{attending}</strong></div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Total Seats</span><strong style={{ color: "var(--green)" }}>{headcount}</strong></div>
-              </div>
-              <div style={{ marginTop: "0.5rem", height: 4, background: "var(--gray-100)", borderRadius: 99, overflow: "hidden" }}>
-                <div style={{ width: invited > 0 ? `${Math.min(100, (attending / invited) * 100)}%` : "0%", height: "100%", background: "var(--green)", transition: "width 0.4s" }} />
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Attending</span><strong style={{ color: "var(--green)" }}>{headcount}{plusOnes > 0 ? <span style={{ fontSize: "0.7rem", color: "var(--green)", fontWeight: 400 }}> ({attending}+{plusOnes})</span> : ""}</strong></div>
               </div>
             </div>
           ))}
@@ -363,7 +364,6 @@ export default function EventDetail() {
                   {multiPart && <th>Parts</th>}
                   <th>Email</th>
                   <SortTh field="rsvp" label="RSVP" />
-                  <th>Plus One</th>
                   <th>Dietary</th>
                   <SortTh field="poc" label="POC" />
                   <SortTh field="sent" label="Email Sent" />
@@ -373,78 +373,98 @@ export default function EventDetail() {
               </thead>
               <tbody>
                 {sorted.map((g) => {
-                  const hasDietary = g.rsvpData && Object.entries(g.rsvpData).some(([k, v]) => (k.toLowerCase().includes("dietary") || k.toLowerCase().includes("allerg")) && v && v !== "None" && v !== "No");
-                  const dietary = g.rsvpData ? Object.entries(g.rsvpData).filter(([k]) => k.toLowerCase().includes("dietary") || k.toLowerCase().includes("allerg")).map(([, v]) => v).filter(Boolean).join(", ") : "";
+                  const dietary = getDietary(g);
+                  const plusOneDietary = getPlusOneDietary(g);
                   const daysAgo = g.emailSentAt ? daysSince(g.emailSentAt) : null;
                   const flagFollowUp = g.emailSent && (!g.rsvpStatus || g.rsvpStatus === "pending") && daysAgo >= 3;
+                  const hasPlusOne = g.plusOneLimit > 0 || g.plusOneEligible;
+                  const plusOneName = g.plusOneRsvpName || g.staffPlusOneNames?.filter(Boolean)[0] || "";
+                  const colSpan = multiPart ? 9 : 8;
 
                   return (
-                    <tr key={g.id} style={{ background: flagFollowUp ? "#FFFBEB" : undefined }}>
-                      <td>
-                        <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
-                          {flagFollowUp && <span title="Needs follow-up" style={{ marginRight: 4 }}>⚠️</span>}
-                          {g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}
-                        </div>
-                        <div style={{ fontSize: "0.75rem", color: "var(--gray-400)" }}>{g.email}</div>
-                        {(g.tags || []).length > 0 && (
-                          <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", marginTop: "0.2rem" }}>
-                            {g.tags.map((tid) => { const tag = eventTags.find((t) => t.id === tid); return tag ? <span key={tid} style={{ padding: "0 0.375rem", borderRadius: 99, background: tag.color + "22", fontSize: "0.65rem", fontWeight: 700, color: tag.color }}>{tag.name}</span> : null; })}
-                          </div>
-                        )}
-                      </td>
-                      {multiPart && (
+                    <>
+                      <tr key={g.id} style={{ background: flagFollowUp ? "#FFFBEB" : undefined }}>
                         <td>
-                          <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
-                            {(g.invitedParts || []).map((pid) => { const p = event.parts.find((x) => x.id === pid); return p ? <PartBadge key={pid} part={p} guest={g} /> : null; })}
+                          <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
+                            {flagFollowUp && <span title="Needs follow-up" style={{ marginRight: 4 }}>⚠️</span>}
+                            {g.title ? `${g.title} ` : ""}{g.firstName} {g.lastName}
+                          </div>
+                          <div style={{ fontSize: "0.75rem", color: "var(--gray-400)" }}>{g.email}</div>
+                          {(g.tags || []).length > 0 && (
+                            <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", marginTop: "0.2rem" }}>
+                              {g.tags.map((tid) => { const tag = eventTags.find((t) => t.id === tid); return tag ? <span key={tid} style={{ padding: "0 0.375rem", borderRadius: 99, background: tag.color + "22", fontSize: "0.65rem", fontWeight: 700, color: tag.color }}>{tag.name}</span> : null; })}
+                            </div>
+                          )}
+                        </td>
+                        {multiPart && (
+                          <td>
+                            <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                              {(g.invitedParts || []).map((pid) => { const p = event.parts.find((x) => x.id === pid); return p ? <PartBadge key={pid} part={p} guest={g} /> : null; })}
+                            </div>
+                          </td>
+                        )}
+                        <td style={{ fontSize: "0.8rem" }}>
+                          {!g.emailSent ? <span style={{ color: "var(--gray-400)" }}>Not sent</span>
+                            : g.emailBounced ? <span className="badge badge-bounced">Bounced</span>
+                            : g.emailOpened ? <span className="badge badge-opened">Opened</span>
+                            : <span className="badge badge-sent">Sent</span>}
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+                            <span className={`badge badge-${g.rsvpStatus || "pending"}`} style={{ fontSize: "0.75rem" }}>
+                              {g.rsvpStatus === "yes" ? "Attending" : g.rsvpStatus === "no" ? "Declined" : "Pending"}
+                            </span>
+                            {g.rsvpSubmittedAt && <span style={{ fontSize: "0.7rem", color: "var(--gray-400)" }}>{fmtDate(g.rsvpSubmittedAt)}</span>}
+                            {g.rsvpOverridden && <span title="Staff edited" style={{ fontSize: "0.65rem", color: "var(--amber)" }}>★</span>}
                           </div>
                         </td>
-                      )}
-                      <td style={{ fontSize: "0.8rem" }}>
-                        {!g.emailSent ? <span style={{ color: "var(--gray-400)" }}>Not sent</span>
-                          : g.emailBounced ? <span className="badge badge-bounced">Bounced</span>
-                          : g.emailOpened ? <span className="badge badge-opened">Opened</span>
-                          : <span className="badge badge-sent">Sent</span>}
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
-                          <span className={`badge badge-${g.rsvpStatus || "pending"}`} style={{ fontSize: "0.75rem" }}>
-                            {g.rsvpStatus === "yes" ? "Attending" : g.rsvpStatus === "no" ? "Declined" : "Pending"}
-                          </span>
-                          {g.rsvpSubmittedAt && <span style={{ fontSize: "0.7rem", color: "var(--gray-400)" }}>{fmtDate(g.rsvpSubmittedAt)}</span>}
-                          {g.rsvpOverridden && <span title="Staff edited" style={{ fontSize: "0.65rem", color: "var(--amber)" }}>★</span>}
-                        </div>
-                      </td>
-                      <td style={{ fontSize: "0.8rem" }}>
-                        {(g.plusOneLimit > 0 || g.plusOneEligible) ? (
-                          <div>
-                            <div style={{ fontWeight: 600, color: g.plusOneRsvpStatus === "yes" ? "var(--green)" : "var(--gray-400)" }}>
-                              {g.plusOneRsvpStatus === "yes" ? "✓ Attending" : g.plusOneRsvpStatus === "no" ? "✗ Declined" : "—"}
+                        <td style={{ fontSize: "0.8rem", maxWidth: 160 }}>
+                          {dietary ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>🍽 {dietary}</span> : <span style={{ color: "var(--gray-300)" }}>—</span>}
+                        </td>
+                        <td style={{ fontSize: "0.8rem", color: "var(--gray-500)" }}>{g.staffPoc || "—"}</td>
+                        <td style={{ fontSize: "0.75rem", color: "var(--gray-400)", whiteSpace: "nowrap" }}>
+                          {g.emailSentAt ? (
+                            <div>
+                              <div>{fmtDate(g.emailSentAt)}</div>
+                              {daysAgo !== null && <div style={{ color: flagFollowUp ? "var(--amber)" : "var(--gray-300)" }}>{daysAgo === 0 ? "today" : `${daysAgo}d ago`}</div>}
                             </div>
-                            {g.plusOneRsvpName && <div style={{ fontSize: "0.75rem", color: "var(--gray-500)" }}>{g.plusOneRsvpName}</div>}
-                          </div>
-                        ) : <span style={{ color: "var(--gray-300)" }}>—</span>}
-                      </td>
-                      <td style={{ fontSize: "0.8rem", maxWidth: 160 }}>
-                        {hasDietary
-                          ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>🍽 {dietary}</span>
-                          : <span style={{ color: "var(--gray-300)" }}>—</span>}
-                      </td>
-                      <td style={{ fontSize: "0.8rem", color: "var(--gray-500)" }}>{g.staffPoc || "—"}</td>
-                      <td style={{ fontSize: "0.75rem", color: "var(--gray-400)", whiteSpace: "nowrap" }}>
-                        {g.emailSentAt ? (
-                          <div>
-                            <div>{fmtDate(g.emailSentAt)}</div>
-                            {daysAgo !== null && <div style={{ color: flagFollowUp ? "var(--amber)" : "var(--gray-300)" }}>{daysAgo === 0 ? "today" : `${daysAgo}d ago`}</div>}
-                          </div>
-                        ) : "—"}
-                      </td>
-                      <td style={{ minWidth: 140 }}>
-                        <InlineNote guestId={g.id} value={g.notes} />
-                      </td>
-                      <td>
-                        <RsvpOverride guestId={g.id} value={g.rsvpStatus} />
-                      </td>
-                    </tr>
+                          ) : "—"}
+                        </td>
+                        <td style={{ minWidth: 140 }}>
+                          <InlineNote guestId={g.id} value={g.notes} />
+                        </td>
+                        <td>
+                          <RsvpOverride guestId={g.id} value={g.rsvpStatus} />
+                        </td>
+                      </tr>
+                      {/* Plus-one sub-row */}
+                      {hasPlusOne && (
+                        <tr key={`${g.id}_plus`} style={{ background: "#FFFBEB", borderLeft: "3px solid var(--gold)" }}>
+                          <td style={{ paddingLeft: "2rem" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                              <span style={{ color: "var(--gold-dark)", fontSize: "0.7rem", fontWeight: 800, textTransform: "uppercase" }}>＋1</span>
+                              {plusOneName
+                                ? <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--gray-700)" }}>{plusOneName}</span>
+                                : <span style={{ fontSize: "0.8rem", color: "var(--gray-400)", fontStyle: "italic" }}>
+                                    {g.plusOneRsvpStatus === "no" ? "Not bringing a guest" : "Name not provided"}
+                                  </span>}
+                            </div>
+                            <div style={{ fontSize: "0.72rem", color: "var(--gray-400)", paddingLeft: "1.5rem" }}>of {g.firstName} {g.lastName}</div>
+                          </td>
+                          {multiPart && <td />}
+                          <td />
+                          <td>
+                            <span className={`badge badge-${g.plusOneRsvpStatus || "pending"}`} style={{ fontSize: "0.72rem" }}>
+                              {g.plusOneRsvpStatus === "yes" ? "Attending" : g.plusOneRsvpStatus === "no" ? "Declined" : "Pending"}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: "0.8rem" }}>
+                            {plusOneDietary ? <span style={{ color: "var(--amber)", fontWeight: 600 }}>🍽 {plusOneDietary}</span> : <span style={{ color: "var(--gray-300)" }}>—</span>}
+                          </td>
+                          <td colSpan={4} />
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>

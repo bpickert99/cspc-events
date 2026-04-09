@@ -70,8 +70,8 @@ function buildEmailHtmlWrapper(bodyHtml, guest, attachments) {
 ${pixelHtml}
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F8FC;padding:32px 16px;"><tr><td align="center">
 <table width="580" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(15,26,69,.10);">
-  <tr><td style="background:linear-gradient(135deg,#080F2E 0%,#1B2B6B 100%);padding:22px 32px;text-align:center;">
-    <img src="${LOGO_URL}" alt="CSPC" style="height:38px;filter:brightness(0) invert(1);" />
+  <tr><td style="background:#FFFFFF;padding:18px 32px;text-align:center;border-bottom:3px solid #1B2B6B;">
+    <img src="${LOGO_URL}" alt="CSPC" style="height:42px;" />
   </td></tr>
   <tr><td style="padding:28px 36px;color:#1A202C;font-size:15px;line-height:1.75;">${bodyHtml}${attHtml}</td></tr>
   <tr><td style="background:#F6F8FC;padding:14px 36px;text-align:center;font-size:12px;color:#94A0B8;border-top:1px solid #E4E8F0;">
@@ -435,6 +435,13 @@ export default function InvitationComposer() {
 
   // ─── SENT DETAIL VIEW ────────────────────────────────────────────────────────
   if (view === "sent-detail") {
+    // Build a preview of the email using a representative guest (first recipient)
+    const firstRecipient = sentRecipients[0];
+    const previewGuestForSent = firstRecipient ? guests.find((g) => g.id === firstRecipient.guestId) || null : null;
+    const sentPreviewHtml = previewGuestForSent && campaign
+      ? buildEmailHtmlWrapper(getBodyHtml(previewGuestForSent), previewGuestForSent, campaign.attachments || [])
+      : null;
+
     return (
       <div>
         <div className="page-header">
@@ -445,36 +452,60 @@ export default function InvitationComposer() {
           </div>
         </div>
 
-        {sentRecipients.length === 0 ? (
-          <div className="empty-state"><h3>No recipient records found</h3></div>
-        ) : (
-          <div className="card">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                  <th>Sent At</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sentRecipients.map((r) => (
-                  <tr key={r.id}>
-                    <td style={{ fontWeight: 600 }}>{r.guestName}</td>
-                    <td style={{ fontSize: "0.875rem", color: "var(--gray-500)" }}>{r.guestEmail}</td>
-                    <td>
-                      <span className={`badge ${r.status === "failed" ? "badge-bounced" : "badge-yes"}`}>
-                        {r.status === "failed" ? "Failed" : "Sent"}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: "0.8125rem", color: "var(--gray-500)" }}>{fmtDateTime(r.sentAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "1.25rem", alignItems: "start" }}>
+          {/* Recipients table */}
+          <div>
+            <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.5rem" }}>
+              Recipients ({sentRecipients.length})
+            </div>
+            {sentRecipients.length === 0 ? (
+              <div className="empty-state"><h3>No recipient records found</h3></div>
+            ) : (
+              <div className="card">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th>Sent At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sentRecipients.map((r) => (
+                      <tr key={r.id}>
+                        <td style={{ fontWeight: 600 }}>{r.guestName}</td>
+                        <td style={{ fontSize: "0.875rem", color: "var(--gray-500)" }}>{r.guestEmail}</td>
+                        <td>
+                          <span className={`badge ${r.status === "failed" ? "badge-bounced" : "badge-yes"}`}>
+                            {r.status === "failed" ? "Failed" : "Sent"}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: "0.8125rem", color: "var(--gray-500)" }}>{fmtDateTime(r.sentAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Email preview */}
+          <div style={{ position: "sticky", top: "72px" }}>
+            <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--gray-500)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.5rem" }}>
+              Email Preview
+            </div>
+            <div className="card" style={{ overflow: "hidden" }}>
+              {sentPreviewHtml ? (
+                <iframe srcDoc={sentPreviewHtml} title="Sent email preview" style={{ width: "100%", height: 560, border: "none", display: "block" }} />
+              ) : (
+                <div className="empty-state" style={{ padding: "2rem" }}>
+                  <p style={{ fontSize: "0.875rem", color: "var(--gray-400)" }}>Preview unavailable — campaign data may be in an older format.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
