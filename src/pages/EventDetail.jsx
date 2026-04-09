@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   doc, getDoc, collection, query, where, getDocs, onSnapshot,
@@ -382,7 +382,7 @@ export default function EventDetail() {
                   const colSpan = multiPart ? 9 : 8;
 
                   return (
-                    <>
+                    <React.Fragment key={g.id}>
                       <tr key={g.id} style={{ background: flagFollowUp ? "#FFFBEB" : undefined }}>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
@@ -464,7 +464,7 @@ export default function EventDetail() {
                           <td colSpan={4} />
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </tbody>

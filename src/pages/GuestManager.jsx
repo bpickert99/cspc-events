@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import {
   collection, query, where, onSnapshot, doc, addDoc, updateDoc,
@@ -689,8 +689,7 @@ export default function GuestManager() {
                 const isSelected = selected.has(g.id);
 
                 return (
-                  <>
-                    <tr key={g.id}
+                  <React.Fragment key={g.id}>
                       onClick={() => quickTagMode ? handleQuickTag(g) : undefined}
                       style={{ cursor: quickTagMode ? "pointer" : "default", background: isSelected ? "var(--navy-light)" : quickTagMode ? (hasQuickTag ? quickTag?.color + "18" : "transparent") : undefined }}>
                       <td onClick={(e) => e.stopPropagation()}>
@@ -758,7 +757,7 @@ export default function GuestManager() {
                         <td />
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>
