@@ -690,6 +690,7 @@ export default function GuestManager() {
 
                 return (
                   <React.Fragment key={g.id}>
+                    <tr
                       onClick={() => quickTagMode ? handleQuickTag(g) : undefined}
                       style={{ cursor: quickTagMode ? "pointer" : "default", background: isSelected ? "var(--navy-light)" : quickTagMode ? (hasQuickTag ? quickTag?.color + "18" : "transparent") : undefined }}>
                       <td onClick={(e) => e.stopPropagation()}>
