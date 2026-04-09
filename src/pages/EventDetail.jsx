@@ -310,7 +310,7 @@ export default function EventDetail() {
       {/* ─── Dietary alert ────────────────────────────────────────────────── */}
       {dietaryGuests.length > 0 && (
         <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: "var(--radius)", padding: "0.75rem 1rem", marginBottom: "1.25rem", fontSize: "0.875rem", color: "#92400E" }}>
-          🍽 <strong>{dietaryGuests.length} attending guest{dietaryGuests.length !== 1 ? "s" : ""}</strong> {dietaryGuests.length === 1 ? "has" : "have"} dietary restrictions or allergies. <button className="btn btn-ghost btn-sm" style={{ color: "#92400E", fontSize: "0.8rem" }} onClick={() => setActiveFilter(activeFilter === "dietary" ? "all" : "dietary")}>{activeFilter === "dietary" ? "Show all →" : "View dietary →"}</button>
+          🍽 <strong>{dietaryGuests.length} attending guest{dietaryGuests.length !== 1 ? "s" : ""}</strong> {dietaryGuests.length === 1 ? "has" : "have"} dietary restrictions — use the <strong>🍽 Dietary</strong> filter above to view them.
         </div>
       )}
 
@@ -320,12 +320,13 @@ export default function EventDetail() {
           {/* Quick filter pills */}
           <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap" }}>
             {filterBtn("all", "All", total)}
-            {filterBtn("attending", "Attending", attending, "var(--green)")}
+            {filterBtn("attending", "Attending", primaryAttending, "var(--green)")}
             {filterBtn("pending", "Pending", pending, "var(--amber)")}
             {filterBtn("declined", "Declined", declined, "var(--red)")}
-            {needsFollowUp.length > 0 && filterBtn("followup", "Follow-Up", needsFollowUp.length, "#D97706")}
+            {needsFollowUp.length > 0 && filterBtn("followup", "⚠ Follow-Up", needsFollowUp.length, "#D97706")}
             {filterBtn("notsent", "Not Sent", guests.filter((g) => !g.emailSent).length)}
-            {filterBtn("opened", "Opened Email", opened, "var(--navy)")}
+            {filterBtn("opened", "Opened", opened, "var(--navy)")}
+            {dietaryGuests.length > 0 && filterBtn("dietary", "🍽 Dietary", dietaryGuests.length, "#92400E")}
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
             {/* Part filter */}

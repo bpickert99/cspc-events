@@ -621,29 +621,47 @@ export default function GuestManager() {
       </div>
 
       {/* Filters */}
-      <div className="guest-filters">
-        <div className="search-input">
-          <input className="form-input" placeholder="Search guests..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: "2.125rem" }} />
+      <div style={{ marginBottom: "0.75rem" }}>
+        {/* Status filter pills */}
+        <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", marginBottom: "0.625rem" }}>
+          {[
+            { val: "all",     label: "All",       color: null },
+            { val: "yes",     label: "Attending", color: "var(--green)" },
+            { val: "pending", label: "Pending",   color: "var(--amber)" },
+            { val: "no",      label: "Declined",  color: "var(--red)" },
+          ].map(({ val, label, color }) => {
+            const count = val === "all" ? guests.length
+              : val === "yes" ? guests.filter((g) => g.rsvpStatus === "yes").length
+              : val === "no" ? guests.filter((g) => g.rsvpStatus === "no").length
+              : guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length;
+            const active = filterStatus === val;
+            return (
+              <button key={val} onClick={() => setFilterStatus(val)}
+                style={{ padding: "0.375rem 0.875rem", borderRadius: 99, fontSize: "0.8125rem", fontWeight: 600, cursor: "pointer", border: "1.5px solid", transition: "var(--transition)", borderColor: active ? (color || "var(--navy)") : "var(--gray-200)", background: active ? (color || "var(--navy)") : "white", color: active ? "white" : "var(--gray-600)" }}>
+                {label} <span style={{ fontSize: "0.7rem", opacity: 0.85 }}>({count})</span>
+              </button>
+            );
+          })}
         </div>
-        {multiPart && (
-          <select className="form-select" style={{ width: "auto" }} value={filterPart} onChange={(e) => setFilterPart(e.target.value)}>
-            <option value="all">All parts</option>
-            {event.parts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        )}
-        {eventTags.length > 0 && (
-          <select className="form-select" style={{ width: "auto" }} value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
-            <option value="all">All tags</option>
-            {eventTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        )}
-        <select className="form-select" style={{ width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="all">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="yes">Attending</option>
-          <option value="no">Declined</option>
-        </select>
-        <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>{sorted.length} shown</span>
+        {/* Secondary filters row */}
+        <div className="guest-filters">
+          <div className="search-input">
+            <input className="form-input" placeholder="Search guests..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: "2.125rem" }} />
+          </div>
+          {multiPart && (
+            <select className="form-select" style={{ width: "auto" }} value={filterPart} onChange={(e) => setFilterPart(e.target.value)}>
+              <option value="all">All parts</option>
+              {event.parts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          {eventTags.length > 0 && (
+            <select className="form-select" style={{ width: "auto" }} value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
+              <option value="all">All tags</option>
+              {eventTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          )}
+          <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)", marginLeft: "auto" }}>{sorted.length} shown</span>
+        </div>
       </div>
 
       {/* Table */}
