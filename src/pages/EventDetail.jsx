@@ -211,7 +211,19 @@ export default function EventDetail() {
     return hay.includes(search.toLowerCase());
   };
 
-  const partFn = (g) => filterPart === "all" || (g.invitedParts || []).includes(filterPart);
+  const partFn = (g) => {
+    if (filterPart === "all") return true;
+    // When filtering for attending, check rsvpParts (which parts they're actually attending)
+    // not just invitedParts (which parts they were invited to)
+    if (activeFilter === "attending" && g.rsvpStatus === "yes") {
+      if (Array.isArray(g.rsvpParts) && g.rsvpParts.length > 0) {
+        return g.rsvpParts.includes(filterPart);
+      }
+      // rsvpParts not set — fall back to invitedParts
+      return (g.invitedParts || []).includes(filterPart);
+    }
+    return (g.invitedParts || []).includes(filterPart);
+  };
   const tagFn = (g) => filterTag === "all" || (g.tags || []).includes(filterTag);
 
   const filtered = guests.filter((g) => filterFn(g) && searchFn(g) && partFn(g) && tagFn(g));

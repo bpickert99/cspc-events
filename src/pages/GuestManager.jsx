@@ -532,7 +532,17 @@ export default function GuestManager() {
   const filtered = guests.filter((g) => {
     const name = `${g.title} ${g.firstName} ${g.lastName} ${g.email}`.toLowerCase();
     const matchSearch = !search || name.includes(search.toLowerCase());
-    const matchPart = filterPart === "all" || (g.invitedParts || []).includes(filterPart);
+    const matchPart = filterPart === "all" || (() => {
+      if (filterStatus === "yes" && g.rsvpStatus === "yes") {
+        // When filtering for attending, check which parts they're actually attending
+        if (Array.isArray(g.rsvpParts) && g.rsvpParts.length > 0) {
+          return g.rsvpParts.includes(filterPart);
+        }
+        // rsvpParts not set — fall back to invitedParts
+        return (g.invitedParts || []).includes(filterPart);
+      }
+      return (g.invitedParts || []).includes(filterPart);
+    })();
     const matchStatus = filterStatus === "all" || g.rsvpStatus === filterStatus || (!g.rsvpStatus && filterStatus === "pending");
     const matchTag = filterTag === "all" || (g.tags || []).includes(filterTag);
     return matchSearch && matchPart && matchStatus && matchTag;
