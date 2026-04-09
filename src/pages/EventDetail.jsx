@@ -177,6 +177,7 @@ export default function EventDetail() {
   const declined = guests.filter((g) => g.rsvpStatus === "no").length;
   const pending = guests.filter((g) => !g.rsvpStatus || g.rsvpStatus === "pending").length;
   const sent = guests.filter((g) => g.emailSent).length;
+  const opened = guests.filter((g) => g.emailOpened).length;
   const responded = primaryAttending + declined;
   const responseRate = sent > 0 ? Math.min(100, Math.round((responded / sent) * 100)) : 0;
   const needsFollowUp = guests.filter((g) => g.emailSent && (!g.rsvpStatus || g.rsvpStatus === "pending") && daysSince(g.emailSentAt) >= 3);
