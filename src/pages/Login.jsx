@@ -21,8 +21,10 @@ export default function Login() {
     setLoading(true);
     try {
       if (mode === "reset") {
-        await sendPasswordResetEmail(auth, form.email);
-        setSuccess("Password reset email sent. Check your inbox.");
+        await sendPasswordResetEmail(auth, form.email, {
+          url: window.location.href,
+        });
+        setSuccess(`Reset email sent to ${form.email}. Check your inbox and spam folder — the email comes from noreply@cspc-events.firebaseapp.com.`);
         setLoading(false);
         return;
       }
@@ -39,8 +41,9 @@ export default function Login() {
         "auth/weak-password": "Password must be at least 6 characters.",
         "auth/invalid-email": "Please enter a valid email address.",
         "auth/user-not-found": "No account found with this email.",
+        "auth/too-many-requests": "Too many attempts. Please wait a few minutes and try again.",
       };
-      setError(msgs[err.code] || "Something went wrong. Please try again.");
+      setError(msgs[err.code] || `Something went wrong (${err.code || err.message}). Please try again.`);
     } finally {
       setLoading(false);
     }

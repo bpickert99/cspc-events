@@ -389,7 +389,7 @@ input, textarea, select { font-family: inherit; font-size: 0.9375rem; }
 .search-input::before { content: "🔍"; position: absolute; left: 0.625rem; top: 50%; transform: translateY(-50%); font-size: 0.8rem; z-index: 1; }
 
 /* ─── Compose layout ─────────────────────────────────────────────────────────── */
-.compose-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+.compose-layout { display: flex; gap: 1.5rem; align-items: start; }
 .merge-field-list { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-top: 0.5rem; }
 
 /* ─── Progress bars ─────────────────────────────────────────────────────────── */

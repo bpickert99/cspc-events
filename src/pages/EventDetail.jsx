@@ -195,6 +195,7 @@ export default function EventDetail() {
 
   // ─── Filter guests ──────────────────────────────────────────────────────────
   const filterFn = (g) => {
+    if (activeFilter === "dietary") return (g.rsvpStatus === "yes") && (getDietary(g) || getPlusOneDietary(g));
     if (activeFilter === "attending") return g.rsvpStatus === "yes";
     if (activeFilter === "declined") return g.rsvpStatus === "no";
     if (activeFilter === "pending") return !g.rsvpStatus || g.rsvpStatus === "pending";
@@ -309,7 +310,7 @@ export default function EventDetail() {
       {/* ─── Dietary alert ────────────────────────────────────────────────── */}
       {dietaryGuests.length > 0 && (
         <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: "var(--radius)", padding: "0.75rem 1rem", marginBottom: "1.25rem", fontSize: "0.875rem", color: "#92400E" }}>
-          🍽 <strong>{dietaryGuests.length} attending guest{dietaryGuests.length !== 1 ? "s" : ""}</strong> {dietaryGuests.length === 1 ? "has" : "have"} dietary restrictions or allergies. <button className="btn btn-ghost btn-sm" style={{ color: "#92400E", fontSize: "0.8rem" }} onClick={() => setActiveFilter("attending")}>View →</button>
+          🍽 <strong>{dietaryGuests.length} attending guest{dietaryGuests.length !== 1 ? "s" : ""}</strong> {dietaryGuests.length === 1 ? "has" : "have"} dietary restrictions or allergies. <button className="btn btn-ghost btn-sm" style={{ color: "#92400E", fontSize: "0.8rem" }} onClick={() => setActiveFilter(activeFilter === "dietary" ? "all" : "dietary")}>{activeFilter === "dietary" ? "Show all →" : "View dietary →"}</button>
         </div>
       )}
 

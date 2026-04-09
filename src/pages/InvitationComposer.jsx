@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import {
   doc, getDoc, getDocs, query, collection, where, addDoc,
@@ -24,6 +24,45 @@ const MERGE_FIELDS = [
   { token: "{{rsvpButton}}", label: "RSVP Button", highlight: true },
   { token: "{{rsvpLink}}", label: "RSVP Link (plain)" },
 ];
+
+function ResizablePreview({ children }) {
+  const [width, setWidth] = useState(480);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(0);
+
+  const onMouseDown = (e) => {
+    dragging.current = true;
+    startX.current = e.clientX;
+    startW.current = width;
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!dragging.current) return;
+      const delta = startX.current - e.clientX;
+      setWidth(Math.max(320, Math.min(900, startW.current + delta)));
+    };
+    const onUp = () => { dragging.current = false; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
+
+  return (
+    <div style={{ display: "flex", flexShrink: 0, width }}>
+      <div
+        onMouseDown={onMouseDown}
+        style={{ width: 6, cursor: "ew-resize", background: "var(--gray-200)", borderRadius: 3, flexShrink: 0, margin: "0 6px 0 0", transition: "background 0.15s" }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--navy)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "var(--gray-200)"; }}
+        title="Drag to resize preview"
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+    </div>
+  );
+}
 
 function fmtDateTime(ts) {
   if (!ts) return "—";
@@ -584,8 +623,8 @@ export default function InvitationComposer() {
           </div>
         </>
       ) : (
-        <div className="compose-layout">
-          <div>
+        <div className="compose-layout" ref={(el) => { if (el) el._composeEl = el; }}>
+          <div style={{ flex: "1 1 0", minWidth: 320 }}>
             <div className="card" style={{ marginBottom: "1rem" }}>
               <div className="card-header"><h2>Body</h2></div>
               <div className="card-body">
@@ -640,17 +679,17 @@ export default function InvitationComposer() {
               </div>
             </div>
           </div>
-          <div>
+          <ResizablePreview>
             <div className="card" style={{ position: "sticky", top: "72px" }}>
               <div className="card-header">
                 <h2>Live Preview</h2>
                 {previewGuest && <span style={{ fontSize: "0.8125rem", color: "var(--gray-400)" }}>From: <strong>{previewFromName}</strong></span>}
               </div>
               <div style={{ borderRadius: "0 0 var(--radius-lg) var(--radius-lg)", overflow: "hidden" }}>
-                {previewGuest ? <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 560, border: "none" }} /> : <div className="empty-state" style={{ padding: "3rem" }}>Add guests to preview</div>}
+                {previewGuest ? <iframe srcDoc={previewHtml} title="Email Preview" style={{ width: "100%", height: 640, border: "none" }} /> : <div className="empty-state" style={{ padding: "3rem" }}>Add guests to preview</div>}
               </div>
             </div>
-          </div>
+          </ResizablePreview>
         </div>
       )}
 

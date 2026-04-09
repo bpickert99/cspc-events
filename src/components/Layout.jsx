@@ -25,7 +25,7 @@ export default function Layout() {
           <span>Events</span>
         </NavLink>
         <div className="topbar-divider" />
-        <span className="topbar-title">Center for the Study of the Presidency and Congress</span>
+        
         <nav className="topbar-nav">
           <span className="topbar-user">{user?.displayName || user?.email}</span>
           <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Sign out</button>
